@@ -1,26 +1,52 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  /* Definisikan Warna Kustom Logo di sini (v4 style) */
+  --color-pop-green: #00a651;
+  --color-pop-green-dark: #008a42;
+  --color-pop-green-light: #e6f7ed;
+
+  --color-pop-yellow: #ffc107;
+  --color-pop-yellow-dark: #ff9800;
+  --color-pop-yellow-light: #fff8e1;
+
+  --color-pop-red: #ed1c24;
+  --color-pop-red-light: #fdeded;
+
+  /* Animasi Kustom */
+  --animate-pulse-slow: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* Custom Utilities */
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Styling Scrollbar (Opsional) */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--color-pop-green);
+  border-radius: 9999px;
+  opacity: 0.5;
+}
+
+:root {
+  --selection-color: var(--color-pop-yellow);
+}
+
+*::selection {
+  background-color: var(--selection-color);
+  color: black;
 }
