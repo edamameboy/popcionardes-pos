@@ -1,169 +1,152 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
-import { Search, Barcode, X } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
-import Scanner from './Scanner'
+import { Search, X, Barcode } from 'lucide-react'
+import { useNetwork } from '@/hooks/useNetwork' // <-- Hook Sinyal
+import { db } from '@/utils/db' // <-- Database Lokal
 
-interface ProductInputProps {
-  onAddProduct: (product: any) => void
-}
-
-export default function ProductInput({ onAddProduct }: ProductInputProps) {
+export default function ProductInput({ onAddProduct }: { onAddProduct: (p: any) => void }) {
   const [query, setQuery] = useState('')
-  const [suggestions, setSuggestions] = useState<any[]>([]) // Menyimpan hasil pencarian
-  const [showScanner, setShowScanner] = useState(false)
+  const [results, setResults] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
+  const searchTimeout = useRef<NodeJS.Timeout | null>(null)
   
-  // Ref untuk debounce (jeda pencarian)
-  const debounceRef = useRef<NodeJS.Timeout | null>(null)
   const supabase = createClient()
+  const network = useNetwork() // Cek status online/offline
 
-  // 1. Fungsi Pencarian Otomatis saat mengetik
+  // Efek Pencarian (Debounce)
   useEffect(() => {
-    // Jika query kosong, bersihkan saran
-    if (query.length < 2) {
-      setSuggestions([])
+    if (!query) {
+      setResults([])
       return
     }
 
-    setLoading(true)
+    if (searchTimeout.current) clearTimeout(searchTimeout.current)
 
-    // Clear timeout sebelumnya jika user masih mengetik (Debounce)
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-
-    // Set timeout baru (tunggu 300ms setelah user berhenti mengetik)
-    debounceRef.current = setTimeout(async () => {
-      const { data } = await supabase
-        .from('products')
-        .select('*')
-        .or(`name.ilike.%${query}%,sku.ilike.%${query}%`) // Cari Nama ATAU SKU
-        .limit(5) // Batasi 5 hasil saja biar rapi
+    searchTimeout.current = setTimeout(async () => {
+      setLoading(true)
       
-      setSuggestions(data || [])
-      setLoading(false)
-    }, 300)
+      try {
+        if (network.online) {
+          // === MODE ONLINE: Cari ke Supabase ===
+          const { data, error } = await supabase
+            .from('products')
+            .select('*')
+            .or(`name.ilike.%${query}%,barcode.eq.${query},description.ilike.%${query}%`) // Cari Nama, Barcode, atau SKU (deskripsi)
+            .limit(10)
+          
+          if (data) setResults(data)
+          
+        } else {
+          // === MODE OFFLINE: Cari ke Dexie (Lokal) ===
+          const keyword = query.toLowerCase()
+          
+          // Cari manual di array lokal (Dexie filter)
+          const localData = await db.products
+            .filter(p => 
+               p.name.toLowerCase().includes(keyword) || 
+               (p.barcode === keyword) ||
+               (p.description && p.description.toLowerCase().includes(keyword)) || false
+            )
+            .limit(10)
+            .toArray()
+            
+          setResults(localData)
+        }
+      } catch (err) {
+        console.error(err)
+      } finally {
+        setLoading(false)
+      }
+
+    }, 500) // Delay 500ms biar ga spam
 
     return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current)
+        if (searchTimeout.current) clearTimeout(searchTimeout.current)
     }
-  }, [query])
+  }, [query, network.online])
 
-  // 2. Fungsi Add Product Langsung (Enter atau Scan)
-  const handleDirectSearch = async (keyword: string) => {
-    if (!keyword) return
-    
-    // Matikan loading UI pencarian dropdown karena kita force search
-    setSuggestions([]) 
-
-    const { data } = await supabase
-      .from('products')
-      .select('*')
-      .or(`sku.eq.${keyword},barcode.eq.${keyword},name.ilike.%${keyword}%`)
-      .maybeSingle()
-    
-    if (data) {
-      onAddProduct(data)
-      setQuery('')
-      setShowScanner(false)
-    } else {
-      alert(`Produk "${keyword}" tidak ditemukan.`)
+  // Fungsi Scan Barcode (Simulasi tekan Enter)
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && results.length > 0) {
+      // Jika hasil cuma 1 (scan barcode pas), langsung masuk keranjang
+      if (results.length === 1) {
+        onAddProduct(results[0])
+        setQuery('')
+        setResults([])
+      }
     }
-  }
-
-  // 3. Fungsi saat Item di Dropdown di-klik
-  const handleSelectSuggestion = (product: any) => {
-    onAddProduct(product)
-    setQuery('')
-    setSuggestions([]) // Tutup dropdown
   }
 
   return (
-    <>
-      <div className="p-4 bg-white shadow sticky top-0 z-40">
-        <div className="flex gap-2 relative"> {/* Relative untuk positioning dropdown */}
-          
-          <div className="relative w-full">
-            <input 
-              type="text" 
-              placeholder="Ketik nama produk..."
-              className="border border-gray-300 p-3 pl-10 rounded-lg w-full text-black"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleDirectSearch(query)}
-            />
-            <Search className="absolute left-3 top-3 text-gray-400" size={20} />
-            
-            {/* Tombol Clear Text (X) muncul jika ada ketikan */}
-            {query && (
-              <button 
-                onClick={() => { setQuery(''); setSuggestions([]); }}
-                className="absolute right-3 top-3 text-gray-400 hover:text-red-500"
-              >
-                <X size={18} />
-              </button>
-            )}
-          </div>
-
-          <button 
-            onClick={() => setShowScanner(true)} 
-            className="bg-blue-600 text-white p-3 rounded-lg min-w-[50px] flex justify-center items-center"
-          >
-            <Barcode size={24} />
-          </button>
-
-          {/* --- DROPDOWN HASIL PENCARIAN --- */}
-          {suggestions.length > 0 && (
-            <div className="absolute top-full left-0 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-50 overflow-hidden">
-              <ul>
-                {suggestions.map((item) => (
-                  <li 
-                    key={item.id}
-                    onClick={() => handleSelectSuggestion(item)}
-                    className="flex items-center gap-3 p-3 hover:bg-blue-50 cursor-pointer border-b last:border-b-0 transition-colors"
-                  >
-                    {/* Gambar Kecil */}
-                    <div className="w-10 h-10 bg-gray-100 rounded overflow-hidden flex-shrink-0">
-                      {item.image_url ? (
-                        <img src={item.image_url} alt={item.name} className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-xs text-gray-400">No IMG</div>
-                      )}
-                    </div>
-                    
-                    {/* Detail Produk */}
-                    <div className="flex-1">
-                      <p className="font-bold text-sm text-gray-800">{item.name}</p>
-                      <p className="text-xs text-gray-500">
-                        Rp {item.price.toLocaleString()} • Stok: {item.stock}
-                      </p>
-                    </div>
-
-                    {/* Indikator Tambah */}
-                    <div className="text-blue-600 text-xs font-bold bg-blue-100 px-2 py-1 rounded">
-                      + ADD
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-           
-           {/* Pesan jika loading lama atau tidak ketemu (Opsional) */}
-           {loading && suggestions.length === 0 && (
-             <div className="absolute top-full left-0 w-full bg-white p-2 text-xs text-gray-400 text-center italic border shadow-lg mt-1 rounded">
-               Mencari...
-             </div>
-           )}
-
+    <div className="p-4 relative z-20">
+      <div className="relative">
+        <div className="absolute left-3 top-3 text-gray-400">
+           {loading ? <span className="animate-spin">⏳</span> : <Search size={20} />}
         </div>
+        
+        <input 
+          type="text" 
+          placeholder={network.online ? "Cari Produk / Scan Barcode..." : "Mode Offline: Cari Produk Lokal..."}
+          className={`w-full pl-10 pr-10 p-3 rounded-xl border outline-none shadow-sm transition-all ${
+             network.online 
+               ? 'border-gray-200 dark:border-slate-700 focus:border-pop-green focus:ring-2 focus:ring-pop-green/20' 
+               : 'border-red-300 bg-red-50 focus:border-red-500 text-red-900'
+          } dark:bg-slate-800 dark:text-white`}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={handleKeyDown}
+          autoFocus
+        />
+
+        {query && (
+          <button 
+            onClick={() => { setQuery(''); setResults([]) }} 
+            className="absolute right-3 top-3 text-gray-400 hover:text-red-500"
+          >
+            <X size={20} />
+          </button>
+        )}
       </div>
 
-      {showScanner && (
-        <Scanner 
-          onScanSuccess={(code) => handleDirectSearch(code)}
-          onClose={() => setShowScanner(false)}
-        />
+      {/* Dropdown Hasil Pencarian */}
+      {results.length > 0 && (
+        <div className="absolute left-4 right-4 mt-2 bg-white dark:bg-slate-800 rounded-xl shadow-xl border dark:border-slate-700 max-h-60 overflow-y-auto animate-in fade-in slide-in-from-top-2">
+          {results.map((product) => (
+            <div 
+              key={product.id}
+              onClick={() => {
+                onAddProduct(product)
+                setQuery('') // Reset input setelah pilih
+                setResults([])
+              }}
+              className="p-3 border-b dark:border-slate-700 hover:bg-pop-green-light dark:hover:bg-slate-700 cursor-pointer flex justify-between items-center group"
+            >
+              <div>
+                <div className="font-bold text-gray-800 dark:text-white group-hover:text-pop-green-dark">
+                    {product.name}
+                </div>
+                <div className="text-xs text-gray-500 flex gap-2">
+                   {product.barcode && <span className="flex items-center gap-1"><Barcode size={10}/> {product.barcode}</span>}
+                   <span className={product.stock > 0 ? 'text-green-600' : 'text-red-500'}>
+                     Stok: {product.stock}
+                   </span>
+                </div>
+              </div>
+              <div className="font-bold text-pop-green">
+                Rp {product.price.toLocaleString()}
+              </div>
+            </div>
+          ))}
+        </div>
       )}
-    </>
+      
+      {/* Pesan jika tidak ketemu */}
+      {query && results.length === 0 && !loading && (
+         <div className="absolute left-4 right-4 mt-2 bg-white dark:bg-slate-800 p-3 rounded-xl shadow text-center text-sm text-gray-500 border dark:border-slate-700">
+            Produk tidak ditemukan {network.online ? '' : '(Mode Offline)'}
+         </div>
+      )}
+    </div>
   )
 }
