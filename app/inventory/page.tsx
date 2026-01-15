@@ -115,8 +115,7 @@ export default function Inventory() {
             name: nama,
             price: harga,
             stock: qty,
-            barcode: barcode, 
-            category: 'Umum', 
+            barcode: barcode,  
             description: sku ? `SKU: ${sku}` : '' 
           }
         }).filter(item => item !== null)
