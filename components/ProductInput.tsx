@@ -1,16 +1,16 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/utils/supabase/client'
-import { Search, X, Barcode, ScanLine, XCircle } from 'lucide-react' // Icon ScanLine
+import { Search, X, Barcode, ScanLine, XCircle } from 'lucide-react'
 import { useNetwork } from '@/hooks/useNetwork'
 import { db } from '@/utils/db'
-import { Html5QrcodeScanner } from 'html5-qrcode' // Library Scanner
+import { Html5QrcodeScanner } from 'html5-qrcode'
 
 export default function ProductInput({ onAddProduct }: { onAddProduct: (p: any) => void }) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
-  const [showScanner, setShowScanner] = useState(false) // State untuk kamera scan
+  const [showScanner, setShowScanner] = useState(false)
   const searchTimeout = useRef<NodeJS.Timeout | null>(null)
   
   const supabase = createClient()
@@ -19,31 +19,38 @@ export default function ProductInput({ onAddProduct }: { onAddProduct: (p: any) 
   // --- LOGIKA SCANNER KAMERA ---
   useEffect(() => {
     if (showScanner) {
-      const scanner = new Html5QrcodeScanner(
-        "reader", 
-        { fps: 10, qrbox: { width: 250, height: 250 } }, 
-        false
-      );
+      // Delay sedikit agar modal render dulu baru kamera nyala
+      const timer = setTimeout(() => {
+          const scanner = new Html5QrcodeScanner(
+            "reader", 
+            { 
+                fps: 10, 
+                qrbox: { width: 250, height: 250 },
+                aspectRatio: 1.0 
+            }, 
+            false
+          );
 
-      scanner.render(
-        (decodedText) => {
-          // Jika berhasil scan
-          setQuery(decodedText) // Masukkan teks ke input
-          scanner.clear() // Matikan kamera
-          setShowScanner(false) // Tutup modal
-        },
-        (error) => {
-          // console.warn(error) // Abaikan error scanning frame kosong
-        }
-      );
+          scanner.render(
+            (decodedText) => {
+              setQuery(decodedText) 
+              scanner.clear() 
+              setShowScanner(false) 
+            },
+            (error) => {
+              // console.warn(error)
+            }
+          );
 
-      // Cleanup saat close
-      return () => {
-        scanner.clear().catch(err => console.error("Failed to clear scanner", err));
-      }
+          // Cleanup function
+          return () => {
+             scanner.clear().catch(err => console.error("Failed to clear scanner", err));
+          }
+      }, 100);
+
+      return () => clearTimeout(timer);
     }
   }, [showScanner])
-
 
   // --- LOGIKA PENCARIAN (Sama seperti sebelumnya) ---
   useEffect(() => {
@@ -105,11 +112,9 @@ export default function ProductInput({ onAddProduct }: { onAddProduct: (p: any) 
     }
   }, [query, network.online])
 
-  // --- AUTO ADD JIKA HASIL SCAN CUMA 1 ---
+  // --- AUTO ADD ---
   useEffect(() => {
-    // Fitur: Jika hasil scan barcode presisi (cuma 1 hasil), langsung masuk keranjang
     if (query && results.length === 1 && !loading) {
-       // Cek apakah input query sama persis dengan barcode produk
        if (results[0].barcode === query) {
          onAddProduct(results[0])
          setQuery('')
@@ -150,7 +155,7 @@ export default function ProductInput({ onAddProduct }: { onAddProduct: (p: any) 
             )}
         </div>
 
-        {/* TOMBOL SCANNER KAMERA */}
+        {/* TOMBOL SCANNER */}
         <button 
           onClick={() => setShowScanner(true)}
           className="bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-200 p-3 rounded-xl border border-gray-200 dark:border-slate-600 hover:bg-gray-200"
@@ -159,23 +164,37 @@ export default function ProductInput({ onAddProduct }: { onAddProduct: (p: any) 
         </button>
       </div>
 
-      {/* MODAL SCANNER KAMERA */}
+      {/* --- MODAL SCANNER (REVISI Z-INDEX & LAYOUT) --- */}
       {showScanner && (
-        <div className="fixed inset-0 z-[60] bg-black/90 flex flex-col items-center justify-center p-4">
-          <div className="bg-white rounded-xl p-4 w-full max-w-sm relative">
-             <button 
-               onClick={() => setShowScanner(false)}
-               className="absolute -top-4 -right-4 bg-red-500 text-white rounded-full p-2"
-             >
-               <XCircle size={24} />
-             </button>
-             <h3 className="text-center font-bold mb-4">Scan Barcode Produk</h3>
-             <div id="reader" className="w-full"></div>
+        <div className="fixed inset-0 z-[9999] bg-black/95 flex flex-col items-center justify-center p-4 animate-in fade-in duration-200">
+          
+          {/* Container Putih Scanner */}
+          <div className="bg-white rounded-2xl p-4 w-full max-w-sm relative shadow-2xl">
+             
+             {/* Header Modal */}
+             <div className="flex justify-between items-center mb-4">
+                <h3 className="font-bold text-lg text-gray-800">Scan Barcode</h3>
+                <button 
+                  onClick={() => setShowScanner(false)}
+                  className="bg-gray-100 hover:bg-red-100 text-gray-600 hover:text-red-600 rounded-full p-2 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+             </div>
+
+             {/* Area Kamera */}
+             <div className="rounded-xl overflow-hidden bg-black border-2 border-gray-200">
+                <div id="reader" className="w-full"></div>
+             </div>
+             
+             <p className="text-center text-xs text-gray-500 mt-4">
+                Arahkan kamera ke barcode produk
+             </p>
           </div>
         </div>
       )}
 
-      {/* HASIL PENCARIAN */}
+      {/* DROPDOWN HASIL */}
       {results.length > 0 && (
         <div className="absolute left-4 right-4 mt-2 bg-white dark:bg-slate-800 rounded-xl shadow-xl border dark:border-slate-700 max-h-60 overflow-y-auto z-50">
           {results.map((product) => (
