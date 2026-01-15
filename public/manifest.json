@@ -1,0 +1,19 @@
+{
+  "name": "Popcionardes POS",
+  "short_name": "POPS",
+  "description": "Aplikasi Kasir Popcionardes Toys",
+  "id": "/",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#00a651",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon-512.ico",
+      "sizes": "512x512",
+      "type": "image/x-icon",
+      "purpose": "any maskable"
+    }
+  ]
+}

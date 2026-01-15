@@ -8,9 +8,16 @@ import OfflineSync from '@/components/OfflineSync'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'POPCIONARDES POS',
+  title: 'Popcionardes POS',
+  description: 'Aplikasi Kasir POPCionardes',
   manifest: '/manifest.json',
-  description: 'Aplikasi Kasir POPCIONARDES',
+  icons: {
+    apple: '/icon.ico',
+  },
+  // Tambahkan ini sebagai cadangan:
+  other: {
+    "mobile-web-app-capable": "yes",
+  }
 }
 
 export default function RootLayout({
