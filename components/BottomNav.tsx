@@ -7,40 +7,26 @@ import { createClient } from '@/utils/supabase/client'
 
 export default function BottomNav() {
   const pathname = usePathname()
-  const [isAdmin, setIsAdmin] = useState(false)
-  const supabase = createClient()
+  // const [isAdmin, setIsAdmin] = useState(false) // <--- HAPUS atau comment ini, sudah tidak wajib untuk nav
+  // const supabase = createClient() // <--- HAPUS ini juga biar ringan
 
-  useEffect(() => {
-    const checkRole = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        const { data } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-        if (data?.role === 'admin') setIsAdmin(true)
-      }
-    }
-    checkRole()
-  }, [])
+  // (HAPUS useEffect checkRole di sini agar loading nav lebih cepat. 
+  //  Toh semua orang sekarang boleh lihat menu Transaksi)
 
   if (pathname === '/login' || pathname === '/register') return null
 
-  // Menu Dasar
+  // MENU UNTUK SEMUA ORANG
   const menus = [
     { name: 'Home', href: '/', icon: LayoutDashboard },
     { name: 'Kasir', href: '/pos', icon: ShoppingCart },
     { name: 'Stok', href: '/inventory', icon: Package },
+    { name: 'Trans.', href: '/transactions', icon: FileText }, // <--- PINDAHKAN KE SINI (Jadi menu umum)
+    { name: 'Profil', href: '/profile', icon: User },
   ]
-
-  // Tambahkan Menu Admin jika user adalah Admin
-  if (isAdmin) {
-    menus.push({ name: 'Trans.', href: '/transactions', icon: FileText })
-  }
-
-  // Profil selalu ada di akhir
-  menus.push({ name: 'Profil', href: '/profile', icon: User })
 
   return (
     <div className="fixed bottom-0 left-0 z-50 w-full h-16 bg-white dark:bg-slate-800 border-t border-gray-200 dark:border-slate-700 shadow-lg transition-colors">
-      <div className={`grid h-full mx-auto font-medium ${isAdmin ? 'grid-cols-5' : 'grid-cols-4'}`}>
+      <div className="grid h-full mx-auto font-medium grid-cols-5"> {/* Ubah grid-cols-4 jadi 5 */}
         {menus.map((menu) => {
           const isActive = pathname === menu.href
           return (
