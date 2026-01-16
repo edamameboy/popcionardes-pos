@@ -1,32 +1,27 @@
 'use client'
-import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import Link from 'next/link'
 import { LayoutDashboard, ShoppingCart, Package, User, FileText } from 'lucide-react'
-import { createClient } from '@/utils/supabase/client'
 
 export default function BottomNav() {
   const pathname = usePathname()
-  // const [isAdmin, setIsAdmin] = useState(false) // <--- HAPUS atau comment ini, sudah tidak wajib untuk nav
-  // const supabase = createClient() // <--- HAPUS ini juga biar ringan
 
-  // (HAPUS useEffect checkRole di sini agar loading nav lebih cepat. 
-  //  Toh semua orang sekarang boleh lihat menu Transaksi)
-
+  // Sembunyikan nav di halaman login/register
   if (pathname === '/login' || pathname === '/register') return null
 
-  // MENU UNTUK SEMUA ORANG
+  // Menu STATIS (Selalu 5 item untuk semua user)
   const menus = [
     { name: 'Home', href: '/', icon: LayoutDashboard },
     { name: 'Kasir', href: '/pos', icon: ShoppingCart },
     { name: 'Stok', href: '/inventory', icon: Package },
-    { name: 'Trans.', href: '/transactions', icon: FileText }, // <--- PINDAHKAN KE SINI (Jadi menu umum)
+    { name: 'Trans.', href: '/transactions', icon: FileText }, 
     { name: 'Profil', href: '/profile', icon: User },
   ]
 
   return (
     <div className="fixed bottom-0 left-0 z-50 w-full h-16 bg-white dark:bg-slate-800 border-t border-gray-200 dark:border-slate-700 shadow-lg transition-colors">
-      <div className="grid h-full mx-auto font-medium grid-cols-5"> {/* Ubah grid-cols-4 jadi 5 */}
+      {/* GRID SELALU 5 KOLOM */}
+      <div className="grid h-full mx-auto font-medium grid-cols-5">
         {menus.map((menu) => {
           const isActive = pathname === menu.href
           return (

@@ -1,20 +1,20 @@
 import Dexie, { Table } from 'dexie';
 
-// Interface Transaksi (Tetap sama)
+// Interface Transaksi
 export interface OfflineTransaction {
   id?: number;
   cart: any[];
   total: number;
   paymentMethod: string;
   location: string;
-  proofFiles: Blob[];
+  proofFiles: Blob[]; // Blob karena file gambar disimpan di indexedDB
   discountType: string;
   discountValue: number;
   userId: string;
   createdAt: number;
 }
 
-// Interface Produk (BARU)
+// Interface Produk (Ini yang sebelumnya hilang/kurang)
 export interface OfflineProduct {
   id: number;
   name: string;
@@ -26,15 +26,17 @@ export interface OfflineProduct {
 }
 
 class POSDatabase extends Dexie {
+  // Definisi Type Table
   transactions!: Table<OfflineTransaction>;
-  products!: Table<OfflineProduct>; // <-- Tabel Baru
+  products!: Table<OfflineProduct>; 
 
   constructor() {
     super('PopcionardesPOS');
-    this.version(1).stores({
-      transactions: '++id, createdAt',
-      // Schema untuk produk: id jadi primary key, index di name & barcode biar pencarian cepat
-      products: 'id, name, barcode, description' 
+    
+    // PENTING: Versi dinaikkan ke 2 agar tabel 'products' dibuat
+    this.version(2).stores({
+      transactions: '++id, createdAt', 
+      products: 'id, name, barcode, description' // Schema pencarian
     });
   }
 }
