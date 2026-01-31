@@ -32,23 +32,19 @@ export default function POS() {
   // 1. Fetch Riwayat Event saat Load
   useEffect(() => {
     const fetchEventHistory = async () => {
-      // Ambil 100 transaksi terakhir agar tidak terlalu berat
       const { data } = await supabase
         .from('transactions')
         .select('location_event')
-        .not('location_event', 'is', null) // Jangan ambil yang kosong
+        .not('location_event', 'is', null)
         .order('created_at', { ascending: false })
         .limit(100)
 
       if (data) {
-        // Filter duplikat menggunakan Set
         const uniqueEvents = Array.from(new Set(data.map(item => item.location_event)))
-          .filter(evt => evt && evt.trim() !== '') // Pastikan tidak string kosong
-        
+          .filter(evt => evt && evt.trim() !== '')
         setEventHistory(uniqueEvents)
       }
     }
-    
     fetchEventHistory()
   }, [])
 
@@ -133,15 +129,20 @@ export default function POS() {
       const processedCart = []
       for (const item of cart) {
         if (item.isManual) {
+            // Karena tabel sudah kita perbaiki pakai SQL tadi, 
+            // sekarang kita BISA kirim category dan sku tanpa error.
             const { data: newProd, error: prodError } = await supabase.from('products').insert({
                 name: `(Manual) ${item.name}`,
                 price: item.price,
-                stock: 9999,
-                category: 'Manual',
-                description: 'Input Manual saat Kasir'
+                stock: 9999, // Stok dummy
+                category: 'Manual', // Aman karena kolom category sudah dibuat di SQL
+                sku: `MANUAL-${Date.now()}`, // Aman karena kolom sku sudah dibuat di SQL
             }).select().single()
 
-            if (prodError || !newProd) throw new Error("Gagal menyimpan produk manual: " + item.name)
+            if (prodError || !newProd) {
+                console.error("Error create product manual:", prodError)
+                throw new Error("Gagal menyimpan produk manual: " + prodError.message)
+            }
             processedCart.push({ ...item, id: newProd.id })
         } else {
             processedCart.push(item)
@@ -176,7 +177,7 @@ export default function POS() {
          if (!i.isManual) await supabase.rpc('decrement_stock', { row_id: i.id, quantity_to_sub: i.quantity })
       }
 
-      // F. UPDATE RIWAYAT EVENT DI LOKAL (Agar muncul di dropdown berikutnya)
+      // F. UPDATE RIWAYAT EVENT DI LOKAL
       if (location && !eventHistory.includes(location)) {
         setEventHistory(prev => [location, ...prev])
       }
@@ -187,7 +188,7 @@ export default function POS() {
       const isNet = err.message === 'OFFLINE_MODE' || err.message.includes('fetch') || err.message.includes('network')
       
       if (isNet) {
-          alert("Mode Offline: Transaksi tersimpan. (Produk manual mungkin butuh sinkronisasi nanti).")
+          alert("Mode Offline: Transaksi tersimpan.")
            try { 
              await db.transactions.add({
                 cart, total, paymentMethod, location, proofFiles, discountType, discountValue,
@@ -201,9 +202,7 @@ export default function POS() {
     }
     
     // Reset State
-    setCart([]); setProofFiles([]); 
-    // setLocation(''); // Opsional: Biarkan lokasi tetap terisi jika ingin input cepat di event yang sama
-    setDiscountValue(0); setLoading(false); setIsPanelExpanded(true)
+    setCart([]); setProofFiles([]); setDiscountValue(0); setLoading(false); setIsPanelExpanded(true)
   }
 
   return (
