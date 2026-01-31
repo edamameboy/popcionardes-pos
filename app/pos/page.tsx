@@ -129,19 +129,19 @@ export default function POS() {
       const processedCart = []
       for (const item of cart) {
         if (item.isManual) {
-            // Karena tabel sudah kita perbaiki pakai SQL tadi, 
-            // sekarang kita BISA kirim category dan sku tanpa error.
+            // PERBAIKAN: Hapus category, Hapus description, Pakai SKU
             const { data: newProd, error: prodError } = await supabase.from('products').insert({
                 name: `(Manual) ${item.name}`,
                 price: item.price,
                 stock: 9999, // Stok dummy
-                category: 'Manual', // Aman karena kolom category sudah dibuat di SQL
-                sku: `MANUAL-${Date.now()}`, // Aman karena kolom sku sudah dibuat di SQL
+                sku: `MANUAL-${Date.now()}`, 
             }).select().single()
 
             if (prodError || !newProd) {
                 console.error("Error create product manual:", prodError)
-                throw new Error("Gagal menyimpan produk manual: " + prodError.message)
+                // --- PERBAIKAN ERROR BUILD ADA DI SINI ---
+                // Menggunakan ?.message dan fallback string jika error null
+                throw new Error("Gagal menyimpan produk manual: " + (prodError?.message || "Gagal membuat data"))
             }
             processedCart.push({ ...item, id: newProd.id })
         } else {
