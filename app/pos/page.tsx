@@ -16,14 +16,15 @@ export default function POS() {
   // State Form Transaksi
   const [location, setLocation] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
-  const [note, setNote] = useState('') // STATE BARU UNTUK CATATAN (SPLIT)
+  const [note, setNote] = useState('') 
   const [discountType, setDiscountType] = useState('percent') 
   const [discountValue, setDiscountValue] = useState(0)
   const [proofFiles, setProofFiles] = useState<File[]>([]) 
   const [loading, setLoading] = useState(false)
   
-  // State Pelanggan
+  // State Pelanggan & Auto-fill
   const [showCustomerModal, setShowCustomerModal] = useState(false)
+  const [customersList, setCustomersList] = useState<any[]>([]) // Database lokal pelanggan
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
   const [customerEmail, setCustomerEmail] = useState('')
@@ -49,10 +50,39 @@ export default function POS() {
         setEventHistory(uniqueEvents)
       }
     }
+    const fetchCustomers = async () => {
+      const { data } = await supabase.from('customers').select('*').order('name')
+      if (data) setCustomersList(data)
+    }
+    
     fetchEventHistory()
+    fetchCustomers()
   }, [])
 
   const handleScroll = () => { if (isPanelExpanded) setIsPanelExpanded(false) }
+
+  // --- LOGIKA AUTO-FILL PELANGGAN ---
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value
+    setCustomerPhone(val)
+    // Cek apakah nomor ini ada di database
+    const exist = customersList.find(c => c.phone === val)
+    if (exist) {
+        setCustomerName(exist.name)
+        if (exist.email) setCustomerEmail(exist.email)
+    }
+  }
+
+  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value
+    setCustomerName(val)
+    // Jika namanya cocok, auto-fill HP-nya
+    const exist = customersList.find(c => c.name.toLowerCase() === val.toLowerCase())
+    if (exist) {
+        if (exist.phone) setCustomerPhone(exist.phone)
+        if (exist.email) setCustomerEmail(exist.email)
+    }
+  }
 
   // --- LOGIKA CART ---
   const getTotalQtyInCart = (id: any) => cart.filter(i => i.id === id).reduce((sum, i) => sum + i.quantity, 0)
@@ -129,7 +159,7 @@ export default function POS() {
       customerEmail: customerEmail || '-',
       items: [...cart],
       subtotal, discountAmount, discountType, discountValue, total, paymentMethod,
-      note // Masukkan nota ke struk
+      note 
     }
 
     try {
@@ -152,16 +182,27 @@ export default function POS() {
           const { data } = await supabase.storage.from('pos-images').upload(name, file); if (data) urls.push(data.path)
       }
 
-      // TAMBAHAN: Simpan catatan split ke database transaksi
       const { data: trans, error } = await supabase.from('transactions').insert({
           total_amount: total, payment_method: paymentMethod, 
           location_event: location,
           proof_images: urls, discount_type: discountType, discount_value: discountValue,
-          note: note, // Simpan ke Supabase
+          note: note,
+          customer_name: customerName, 
+          customer_phone: customerPhone, 
           user_id: userId, created_at: new Date().toISOString()
       }).select().single()
 
       if (error) throw error
+
+      // SIMPAN DATA PELANGGAN (UPSERT)
+      if (customerPhone && customerPhone.trim() !== '') {
+         const { error: custErr } = await supabase.from('customers').upsert({
+            name: customerName || 'Pelanggan',
+            phone: customerPhone.trim(),
+            email: customerEmail || null
+         }, { onConflict: 'phone' })
+         if(custErr) console.log("Silent error upsert customer:", custErr)
+      }
 
       const items = processedCart.map(i => ({ transaction_id: trans.id, product_id: i.id, quantity: i.quantity, price_at_purchase: i.price }))
       await supabase.from('transaction_items').insert(items)
@@ -173,7 +214,6 @@ export default function POS() {
       console.log("Error...", err)
       const isNet = err.message === 'OFFLINE_MODE' || err.message.includes('fetch') || err.message.includes('network')
       if (isNet) {
-           // IndexedDB belum ada kolom note, tapi ini aman untuk sementara (bisa di-update nanti)
            try { await db.transactions.add({ cart, total, paymentMethod, location, proofFiles, discountType, discountValue, userId, createdAt: Date.now() }) } 
            catch (e) { alert('Gagal simpan offline.'); setLoading(false); return }
       } else { alert('Error: ' + err.message); setLoading(false); return }
@@ -238,9 +278,10 @@ export default function POS() {
 
         if (uploadError) throw uploadError
 
-        const { data } = supabase.storage.from('pos-images').getPublicUrl(filePath)
+        const { data } = supabase.storage
+            .from('pos-images')
+            .getPublicUrl(filePath)
         
-        // --- PERBAIKAN BUG SHARE DI SINI: Optional Chaining yang aman ---
         const receiptUrl = data?.publicUrl
         if (!receiptUrl) throw new Error("Gagal menghasilkan link struk")
 
@@ -255,14 +296,14 @@ export default function POS() {
             })
         } else {
             await navigator.clipboard.writeText(textToShare)
-            alert("Berhasil! Link struk telah disalin ke clipboard.")
+            alert("Berhasil! Link struk dan pesan telah disalin ke clipboard. Silakan paste di aplikasi chat.")
         }
 
     } catch (error: any) {
         setIsSharing(false)
         if (error.name !== 'AbortError') {
             console.error("Error Share Link:", error)
-            alert("Gagal membagikan link struk: " + (error.message || "Pastikan koneksi stabil"))
+            alert("Gagal membagikan link struk. Pastikan koneksi internet stabil.")
         }
     }
   }
@@ -312,31 +353,16 @@ export default function POS() {
         <div className="px-4 pb-4">
             <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isPanelExpanded ? 'max-h-[500px] opacity-100 mb-3' : 'max-h-0 opacity-0 mb-0'}`}>
                 
-                {/* --- BARIS 1: LOKASI & PEMBAYARAN --- */}
                 <div className="grid grid-cols-2 gap-3 mb-3 pt-1">
-                    <div>
-                        <input list="event-options" placeholder="Pilih / Ketik Event..." className="w-full border p-2 rounded text-sm bg-gray-50 dark:bg-slate-700 dark:border-slate-600 dark:text-white" value={location} onChange={e => setLocation(e.target.value)} />
-                        <datalist id="event-options">{eventHistory.map((evt, idx) => (<option key={idx} value={evt} />))}</datalist>
-                    </div>
-                    {/* OPSI SPLIT DITAMBAHKAN */}
+                    <div><input list="event-options" placeholder="Pilih / Ketik Event..." className="w-full border p-2 rounded text-sm bg-gray-50 dark:bg-slate-700 dark:border-slate-600 dark:text-white" value={location} onChange={e => setLocation(e.target.value)} /><datalist id="event-options">{eventHistory.map((evt, idx) => (<option key={idx} value={evt} />))}</datalist></div>
                     <select className="border p-2 rounded text-sm bg-gray-50 dark:bg-slate-700 dark:border-slate-600 dark:text-white" value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}>
-                        <option value="cash">Cash</option>
-                        <option value="transfer">Transfer</option>
-                        <option value="split">Split (Cash & TF)</option> 
+                        <option value="cash">Cash</option><option value="transfer">Transfer</option><option value="split">Split (Cash & TF)</option> 
                     </select>
                 </div>
 
-                {/* --- BARIS BARU: CATATAN (Muncul jika Split atau opsional) --- */}
                 {paymentMethod === 'split' && (
                     <div className="mb-3 animate-in fade-in slide-in-from-top-2">
-                        <input 
-                            type="text" 
-                            placeholder="Catatan Split (Misal: Cash 50rb, BCA 100rb)" 
-                            className="w-full border p-2 rounded text-sm bg-yellow-50 dark:bg-yellow-900/20 border-yellow-300 dark:border-yellow-700 dark:text-white placeholder-yellow-600 dark:placeholder-yellow-500" 
-                            value={note} 
-                            onChange={e => setNote(e.target.value)} 
-                            required={paymentMethod === 'split'}
-                        />
+                        <input type="text" placeholder="Catatan Split (Misal: Cash 50rb, BCA 100rb)" className="w-full border p-2 rounded text-sm bg-yellow-50 dark:bg-yellow-900/20 border-yellow-300 dark:border-yellow-700 dark:text-white placeholder-yellow-600 dark:placeholder-yellow-500" value={note} onChange={e => setNote(e.target.value)} required={paymentMethod === 'split'}/>
                     </div>
                 )}
 
@@ -344,7 +370,6 @@ export default function POS() {
                     <select className="border p-2 rounded text-sm bg-gray-50 dark:bg-slate-700 dark:border-slate-600 dark:text-white w-20" value={discountType} onChange={e => setDiscountType(e.target.value)}><option value="percent">%</option><option value="nominal">Rp</option></select>
                     <input type="number" placeholder="Nilai Diskon" className="flex-1 border p-2 rounded text-sm bg-gray-50 dark:bg-slate-700 dark:border-slate-600 dark:text-white" value={discountValue || ''} onChange={e => setDiscountValue(Number(e.target.value))} />
                 </div>
-                
                 <div className="mb-1">
                     <div className="flex gap-2 overflow-x-auto pb-2 items-center no-scrollbar">
                     <label className={`flex-shrink-0 w-16 h-16 flex flex-col items-center justify-center bg-gray-100 dark:bg-slate-700 border-2 border-dashed border-gray-300 dark:border-slate-500 rounded-lg ${proofFiles.length >= 5 ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}><Camera size={18} className="text-gray-500 dark:text-gray-300" /><span className="text-[9px] text-gray-500 dark:text-gray-300 mt-1">{proofFiles.length}/5</span><input type="file" accept="image/*" capture="environment" disabled={proofFiles.length >= 5} className="hidden" onChange={handleCameraCapture} /></label>
@@ -363,7 +388,7 @@ export default function POS() {
         </div>
       </div>
 
-      {/* --- MODAL INPUT DATA PELANGGAN --- */}
+      {/* --- MODAL INPUT DATA PELANGGAN DENGAN AUTO-FILL --- */}
       {showCustomerModal && (
         <div className="fixed inset-0 z-[99] bg-black/80 flex items-center justify-center p-4">
             <div className="bg-white dark:bg-slate-800 w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-in fade-in zoom-in duration-200">
@@ -371,19 +396,54 @@ export default function POS() {
                     <h3 className="font-bold text-lg dark:text-white">Data Pembeli (Opsional)</h3>
                     <button onClick={() => setShowCustomerModal(false)} className="text-gray-400 hover:text-red-500"><X size={24}/></button>
                 </div>
+
+                <div className="mb-4 text-[10px] text-blue-600 bg-blue-50 p-2 rounded border border-blue-200 leading-tight">
+                    *Ketik nomor HP untuk mencari pelanggan yang sudah pernah belanja.
+                </div>
+
                 <form onSubmit={handleFinalCheckout} className="space-y-4">
-                    <div>
-                        <label className="text-xs font-bold text-gray-500">Nama Pelanggan</label>
-                        <input type="text" placeholder="Budi Santoso" className="w-full border p-3 rounded-xl bg-gray-50 dark:bg-slate-700 dark:text-white dark:border-slate-600 outline-none focus:ring-2 focus:ring-pop-green" value={customerName} onChange={e => setCustomerName(e.target.value)} />
-                    </div>
+                    
                     <div>
                         <label className="text-xs font-bold text-gray-500">Nomor WhatsApp</label>
-                        <input type="tel" placeholder="0812345..." className="w-full border p-3 rounded-xl bg-gray-50 dark:bg-slate-700 dark:text-white dark:border-slate-600 outline-none focus:ring-2 focus:ring-pop-green" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} />
+                        <input 
+                            type="tel" 
+                            list="cust-phones"
+                            placeholder="0812345..." 
+                            className="w-full border p-3 rounded-xl bg-gray-50 dark:bg-slate-700 dark:text-white dark:border-slate-600 focus:ring-2 focus:ring-pop-green outline-none" 
+                            value={customerPhone} 
+                            onChange={handlePhoneChange} 
+                        />
+                        <datalist id="cust-phones">
+                            {customersList.filter(c => c.phone).map(c => <option key={c.id} value={c.phone} />)}
+                        </datalist>
                     </div>
+
+                    <div>
+                        <label className="text-xs font-bold text-gray-500">Nama Pelanggan</label>
+                        <input 
+                            type="text" 
+                            list="cust-names"
+                            placeholder="Budi Santoso" 
+                            className="w-full border p-3 rounded-xl bg-gray-50 dark:bg-slate-700 dark:text-white dark:border-slate-600 focus:ring-2 focus:ring-pop-green outline-none" 
+                            value={customerName} 
+                            onChange={handleNameChange} 
+                        />
+                        <datalist id="cust-names">
+                            {customersList.map(c => <option key={c.id} value={c.name} />)}
+                        </datalist>
+                    </div>
+
                     <div>
                         <label className="text-xs font-bold text-gray-500">Email</label>
-                        <input type="email" placeholder="budi@email.com" className="w-full border p-3 rounded-xl bg-gray-50 dark:bg-slate-700 dark:text-white dark:border-slate-600 outline-none focus:ring-2 focus:ring-pop-green" value={customerEmail} onChange={e => setCustomerEmail(e.target.value)} />
+                        <input 
+                            type="email" 
+                            placeholder="budi@email.com" 
+                            className="w-full border p-3 rounded-xl bg-gray-50 dark:bg-slate-700 dark:text-white dark:border-slate-600 focus:ring-2 focus:ring-pop-green outline-none" 
+                            value={customerEmail} 
+                            onChange={e => setCustomerEmail(e.target.value)} 
+                        />
                     </div>
+                    
                     <button type="submit" disabled={loading} className="w-full bg-pop-green hover:bg-pop-green-dark text-white py-3 rounded-xl font-bold text-lg disabled:bg-gray-400 flex justify-center gap-2 mt-4 transition-colors select-none">
                         {loading ? 'Menyimpan...' : <><CheckCircle size={24} /> Selesaikan Pesanan</>}
                     </button>
@@ -397,6 +457,7 @@ export default function POS() {
         <div className="fixed inset-0 z-[100] bg-black/90 flex flex-col items-center justify-center p-4 overflow-y-auto">
             <h2 className="text-white font-bold text-xl mb-4 mt-20">Transaksi Berhasil! 🎉</h2>
             
+            {/* CONTAINER STRUK KASIR */}
             <div className="bg-white p-5 max-w-[300px] w-full mx-auto shadow-2xl shrink-0" ref={receiptRef} style={{fontFamily: 'monospace', color: '#000000', backgroundColor: '#ffffff'}}>
                 <div className="text-center mb-4">
                     <h1 className="font-bold text-xl tracking-widest">POPCIONARDES</h1>
@@ -438,7 +499,6 @@ export default function POS() {
                 <div className="flex justify-between font-bold text-sm"><span>TOTAL BAYAR:</span><span>Rp {receiptData.total.toLocaleString()}</span></div>
                 <div className="flex justify-between text-[10px] mt-1"><span>Pembayaran:</span><span className="uppercase font-bold">{receiptData.paymentMethod}</span></div>
                 
-                {/* --- MUNCULKAN CATATAN DI STRUK JIKA ADA --- */}
                 {receiptData.note && (
                      <div className="flex justify-between text-[10px] mt-1"><span>Catatan:</span><span className="font-bold text-right">{receiptData.note}</span></div>
                 )}
@@ -451,7 +511,7 @@ export default function POS() {
             </div>
 
             <div className="flex gap-2 mt-6 mb-10 w-full max-w-[300px] shrink-0">
-                <button onClick={downloadPDF} className="flex-1 bg-white text-gray-800 py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-gray-100 text-sm select-none">
+                <button onClick={downloadPDF} className="flex-1 bg-white text-gray-800 py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-gray-100 text-sm select-none shadow-lg">
                     <Download size={18}/> Download
                 </button>
                 <button onClick={shareReceiptLink} disabled={isSharing} className="flex-[2] bg-blue-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-blue-700 shadow-lg shadow-blue-500/30 text-sm disabled:bg-gray-500 transition-colors select-none">
