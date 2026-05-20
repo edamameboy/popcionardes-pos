@@ -50,3 +50,21 @@
   background-color: var(--selection-color);
   color: black;
 }
+
+/* Mencegah highlight / block text pada elemen interaktif */
+button, select, div[role="button"] {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  touch-action: manipulation; /* Mencegah double-tap to zoom di iOS */
+}
+
+/* Memastikan input text iOS tidak otomatis zoom in */
+@media screen and (-webkit-min-device-pixel-ratio: 0) {
+  select,
+  textarea,
+  input {
+    font-size: 16px !important;
+  }
+}

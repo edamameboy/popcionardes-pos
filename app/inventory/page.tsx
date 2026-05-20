@@ -2,17 +2,16 @@
 import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { useRouter } from 'next/navigation'
-import Papa from 'papaparse' // Library pembaca CSV
-import { Plus, Search, Trash2, Upload, FileSpreadsheet, Edit, X, Save, Barcode } from 'lucide-react'
+import Papa from 'papaparse' 
+import { Plus, Search, Trash2, Upload, Download, Edit, X, Save, Barcode } from 'lucide-react'
 
 export default function Inventory() {
   const [products, setProducts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  const [isUploading, setIsUploading] = useState(false) // State loading upload
+  const [isUploading, setIsUploading] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
 
-  // State Edit
   const [editingProduct, setEditingProduct] = useState<any | null>(null)
   
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -55,31 +54,46 @@ export default function Inventory() {
     if (!editingProduct) return
     const { error } = await supabase.from('products').update({
         name: editingProduct.name, price: editingProduct.price,
-        stock: editingProduct.stock, barcode: editingProduct.barcode, sku: editingProduct.sku
+        stock: editingProduct.stock, barcode: editingProduct.barcode, description: editingProduct.description
     }).eq('id', editingProduct.id)
     
     if (error) alert("Gagal update: " + error.message)
     else { alert("Sukses!"); setEditingProduct(null); fetchProducts() }
   }
 
-  // --- FUNGSI 1: DOWNLOAD TEMPLATE CSV ---
-  const downloadTemplate = () => {
-    // Header CSV + 1 Contoh Data Dummy
-    const csvContent = "barcode,sku,nama produk,qty,harga\n8991001,FUNKO-001,Funko Pop Luffy,12,250000"
+  // --- FUNGSI 1: EXPORT CSV UNTUK MASS EDIT ---
+  const handleExportCSV = () => {
+    if (products.length === 0) return alert("Belum ada data untuk diexport.")
+
+    // Format data produk ke bentuk CSV
+    const csvData = products.map(p => {
+      // Hilangkan tulisan "SKU: " saat export agar bersih di excel
+      const cleanSku = p.description ? p.description.replace('SKU: ', '') : ''
+      return {
+        'id': p.id,
+        'barcode': p.barcode || '',
+        'sku': cleanSku,
+        'nama produk': p.name,
+        'qty': p.stock,
+        'harga': p.price
+      }
+    })
+
+    // Ubah JSON ke string CSV
+    const csv = Papa.unparse(csvData)
     
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    // Download file
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const link = document.createElement("a")
-    const url = URL.createObjectURL(blob)
-    
-    link.setAttribute("href", url)
-    link.setAttribute("download", "template_upload_stok.csv")
+    link.href = URL.createObjectURL(blob)
+    link.download = `Data_Produk_${new Date().toISOString().split('T')[0]}.csv`
     link.style.visibility = 'hidden'
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
   }
 
-  // --- FUNGSI 2: UPLOAD & PROCESS CSV (SUDAH DIPERBAIKI) ---
+  // --- FUNGSI 2: IMPORT CSV (BISA INSERT & UPDATE) ---
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -87,24 +101,21 @@ export default function Inventory() {
     setIsUploading(true)
 
     Papa.parse(file, {
-      header: true, // Baris pertama dianggap judul kolom
+      header: true,
       skipEmptyLines: true,
       complete: async (results) => {
         const rows = results.data
         
-        // Mapping data dari CSV ke format Database Supabase
         const formattedData = rows.map((row: any) => {
-          // 1. Ambil data mentah (Mapping nama kolom CSV)
+          const rawId = row['id'] // Ambil ID jika ada (untuk edit)
           const rawNama = row['nama produk'] || row['name']
           const rawHarga = row['harga'] || row['price']
           const rawQty = row['qty'] || row['stock']
           const rawBarcode = row['barcode']
           const rawSku = row['sku']
 
-          // 2. Helper: Bersihkan Angka (Hapus "Rp", ".", ",", spasi)
           const cleanNumber = (val: any) => {
             if (!val) return 0
-            // Hapus semua karakter KECUALI angka 0-9
             const cleanStr = String(val).replace(/[^0-9]/g, '')
             return parseInt(cleanStr) || 0
           }
@@ -112,37 +123,42 @@ export default function Inventory() {
           const harga = cleanNumber(rawHarga)
           const qty = cleanNumber(rawQty)
 
-          // 3. Validasi Wajib: Nama ada & Harga > 0
           if (!rawNama || harga <= 0) return null
 
-          // 4. Return Object (Tanpa 'category', sku masuk ke 'sku')
-          return {
+          const productObj: any = {
             name: rawNama,
             price: harga,
             stock: qty,
             barcode: rawBarcode ? String(rawBarcode) : null,
-            sku: rawSku ? `SKU: ${rawSku}` : '' 
+            description: rawSku ? `SKU: ${rawSku}` : '' 
           }
-        }).filter(item => item !== null) // Hapus baris yang kosong/error
+
+          // JIKA ADA ID, masukkan ke object agar Supabase tahu ini UPDATE, bukan INSERT BARU
+          if (rawId) {
+            productObj.id = parseInt(rawId)
+          }
+
+          return productObj
+        }).filter(item => item !== null) 
 
         if (formattedData.length === 0) {
-          alert('Gagal! Tidak ada data valid. Pastikan format CSV benar dan harga berupa angka.')
+          alert('Gagal! Tidak ada data valid.')
           setIsUploading(false)
           return
         }
 
-        // Simpan Massal ke Supabase
-        const { error } = await supabase.from('products').insert(formattedData)
+        // MENGGUNAKAN UPSERT: Jika ada ID -> Edit, Jika tidak ada ID -> Tambah Baru
+        const { error } = await supabase.from('products').upsert(formattedData)
 
         if (error) {
             alert('Gagal Upload: ' + error.message)
         } else {
-            alert(`Sukses import ${formattedData.length} produk!`)
-            fetchProducts() // Refresh table
+            alert(`Sukses import & edit ${formattedData.length} produk!`)
+            fetchProducts()
         }
         
         setIsUploading(false)
-        if (fileInputRef.current) fileInputRef.current.value = '' // Reset input file
+        if (fileInputRef.current) fileInputRef.current.value = '' 
       },
       error: (error) => {
         alert('Error membaca file: ' + error.message)
@@ -151,7 +167,6 @@ export default function Inventory() {
     })
   }
 
-  // Filter Pencarian
   const filtered = products.filter(p => 
     p.name.toLowerCase().includes(search.toLowerCase()) || 
     (p.barcode && p.barcode.includes(search))
@@ -165,7 +180,6 @@ export default function Inventory() {
         <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Inventory</h1>
         
         <div className="flex flex-col md:flex-row gap-3">
-            {/* Input Cari */}
             <div className="relative flex-1">
                 <Search className="absolute left-3 top-3 text-gray-400" size={20} />
                 <input 
@@ -177,10 +191,8 @@ export default function Inventory() {
                 />
             </div>
 
-            {/* Tombol Action Group */}
             {isAdmin && (
                 <div className="flex gap-2 overflow-x-auto pb-1">
-                    {/* 1. Tombol Tambah Manual */}
                     <button 
                     onClick={() => router.push('/inventory/add')}
                     className="bg-pop-green hover:bg-pop-green-dark text-white px-4 py-2 rounded-lg flex items-center gap-2 font-medium whitespace-nowrap"
@@ -188,7 +200,6 @@ export default function Inventory() {
                     <Plus size={20} /> <span className="hidden md:inline">Baru</span>
                     </button>
 
-                    {/* 2. Tombol Upload CSV (Hidden Input + Label Button) */}
                     <input 
                         type="file" 
                         accept=".csv" 
@@ -202,16 +213,16 @@ export default function Inventory() {
                     className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 font-medium whitespace-nowrap"
                     >
                     {isUploading ? <span className="animate-spin">⏳</span> : <Upload size={20} />} 
-                    <span className="hidden md:inline">CSV</span>
+                    <span className="hidden md:inline">Import CSV</span>
                     </button>
 
-                    {/* 3. Tombol Download Template */}
+                    {/* TOMBOL EXPORT MASS EDIT */}
                     <button 
-                        onClick={downloadTemplate}
-                        className="bg-gray-200 dark:bg-slate-700 hover:bg-gray-300 dark:hover:bg-slate-600 text-gray-700 dark:text-gray-300 px-4 py-2 rounded-lg flex items-center gap-2"
-                        title="Download Template Excel/CSV"
+                        onClick={handleExportCSV}
+                        className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 font-medium whitespace-nowrap"
+                        title="Download Data untuk Edit Massal"
                     >
-                        <FileSpreadsheet size={20} />
+                        <Download size={20} /> <span className="hidden md:inline">Export</span>
                     </button>
                 </div>
             )}
@@ -229,7 +240,7 @@ export default function Inventory() {
                         <div className="font-bold text-lg dark:text-white">{product.name}</div>
                         <div className="text-xs text-gray-500 flex items-center gap-1 mt-1">
                             <Barcode size={12}/> {product.barcode || '-'} 
-                            {product.sku && <span className="text-blue-500 ml-2">{product.sku}</span>}
+                            {product.description && <span className="text-blue-500 ml-2">{product.description}</span>}
                         </div>
                     </div>
                     <div className={`px-2 py-1 rounded text-xs font-bold ${product.stock <= 5 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
@@ -274,7 +285,7 @@ export default function Inventory() {
                   <td className="p-4">
                     <div className="font-bold dark:text-white">{product.name}</div>
                     <div className="text-xs text-gray-500">{product.barcode || '-'}</div>
-                    <div className="text-xs text-blue-500">{product.sku || ''}</div>
+                    <div className="text-xs text-blue-500">{product.description || ''}</div>
                   </td>
                   <td className="p-4 dark:text-gray-300">Rp {product.price.toLocaleString()}</td>
                   <td className={`p-4 text-center font-bold ${product.stock <= 5 ? 'text-red-500' : 'text-green-600'}`}>
@@ -361,8 +372,8 @@ export default function Inventory() {
                             <label className="text-sm text-gray-500 dark:text-gray-400">Deskripsi / SKU</label>
                             <input 
                                 className="w-full border p-2 rounded-lg bg-gray-50 dark:bg-slate-700 dark:border-slate-600 dark:text-white text-sm"
-                                value={editingProduct.sku || ''}
-                                onChange={e => setEditingProduct({...editingProduct, sku: e.target.value})}
+                                value={editingProduct.description || ''}
+                                onChange={e => setEditingProduct({...editingProduct, description: e.target.value})}
                             />
                         </div>
                     </div>

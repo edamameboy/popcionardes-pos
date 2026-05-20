@@ -1,8 +1,11 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { useRouter } from 'next/navigation'
-import { Calendar, CreditCard, ChevronDown, ChevronUp, Trash2, X, Tag, Gift, User } from 'lucide-react'
+import { Calendar, CreditCard, ChevronDown, ChevronUp, Trash2, X, Tag, Gift, User, Edit, Printer, Download, Share2 } from 'lucide-react'
+import { toPng } from 'html-to-image' 
+import jsPDF from 'jspdf'
+import { useNetwork } from '@/hooks/useNetwork'
 
 export default function Transactions() {
   const [transactions, setTransactions] = useState<any[]>([])
@@ -10,9 +13,16 @@ export default function Transactions() {
   const [loading, setLoading] = useState(true)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [previewImage, setPreviewImage] = useState<string | null>(null)
-  
-  // STATE BARU: Untuk kontrol tombol hapus
   const [isAdmin, setIsAdmin] = useState(false) 
+
+  const [editModal, setEditModal] = useState(false)
+  const [editData, setEditData] = useState<any>(null)
+
+  const [showReceipt, setShowReceipt] = useState(false)
+  const [receiptData, setReceiptData] = useState<any>(null)
+  const [isSharing, setIsSharing] = useState(false)
+  const receiptRef = useRef<HTMLDivElement>(null)
+  const network = useNetwork()
 
   const supabase = createClient()
   const router = useRouter()
@@ -25,13 +35,9 @@ export default function Transactions() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return router.push('/login')
 
-    // 1. Cek Role (Tapi JANGAN ditendang kalau bukan admin)
     const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-    if (profile?.role === 'admin') {
-      setIsAdmin(true) // Aktifkan mode admin
-    }
+    if (profile?.role === 'admin') setIsAdmin(true)
 
-    // 2. Ambil data (Semua user boleh fetch karena Policy SQL sudah 'SELECT true')
     await Promise.all([fetchTransactions(), fetchProfiles()])
     setLoading(false)
   }
@@ -48,40 +54,145 @@ export default function Transactions() {
   const fetchTransactions = async () => {
     const { data } = await supabase
       .from('transactions')
-      .select(`
-        *,
-        transaction_items ( quantity, price_at_purchase, products ( name ) )
-      `)
+      .select(`*, transaction_items ( quantity, price_at_purchase, products ( name ) )`)
       .order('created_at', { ascending: false })
-
     if (data) setTransactions(data)
   }
 
+  // --- PERBAIKAN 1: Optimistic Update Hapus ---
   const deleteTransaction = async (id: string) => {
-    if(!confirm('Hapus transaksi ini? Stok tidak akan kembali otomatis.')) return
-    
-    // Keamanan Ganda: Cek di frontend, nanti di backend juga ditolak SQL Policy
-    if (!isAdmin) {
-        alert("Akses Ditolak: Hanya Admin yang boleh menghapus.")
-        return
-    }
+    if(!confirm('Hapus (Void) transaksi ini? Stok tidak akan kembali otomatis.')) return
+    if (!isAdmin) return alert("Akses Ditolak: Hanya Admin yang boleh menghapus.")
 
     const { error } = await supabase.from('transactions').delete().eq('id', id)
-    
-    if (error) {
-        alert("Gagal menghapus! " + error.message)
-    } else {
-        fetchTransactions()
+    if (error) alert("Gagal menghapus! " + error.message)
+    else {
+        // Hapus dari UI seketika tanpa nunggu reload DB
+        setTransactions(prev => prev.filter(t => t.id !== id))
     }
   }
 
-  const getImgUrl = (path: string) => 
-    `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/pos-images/${path}`
+  const handleEdit = (t: any) => {
+    setEditData({
+        id: t.id,
+        payment_method: t.payment_method,
+        note: t.note || '',
+        location_event: t.location_event || '',
+        customer_name: t.customer_name || '',
+        customer_phone: t.customer_phone || ''
+    })
+    setEditModal(true)
+  }
+
+  // --- PERBAIKAN 2: Optimistic Update Edit ---
+  const saveEdit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    
+    // 1. Update ke Supabase
+    const { error } = await supabase.from('transactions').update({
+        payment_method: editData.payment_method,
+        note: editData.note,
+        location_event: editData.location_event,
+        customer_name: editData.customer_name,
+        customer_phone: editData.customer_phone
+    }).eq('id', editData.id)
+
+    if(error) {
+        alert("Gagal update: " + error.message)
+    } else {
+        // 2. FORCE REFRESH: Kita paksa fetch ulang data terbaru dari database
+        // Ini memastikan cache lama dibuang dan data baru masuk
+        await fetchTransactions()
+        
+        setEditModal(false)
+        alert("Data berhasil diupdate dan disinkronisasi!")
+    }
+  }
+
+  const openReceipt = (t: any) => {
+    const subtotal = t.transaction_items.reduce((acc: number, item: any) => acc + (item.price_at_purchase * item.quantity), 0)
+    const timeMillis = new Date(t.created_at).getTime().toString()
+    const notaId = `TR-${timeMillis.slice(-8)}`
+    
+    setReceiptData({
+        notaId: notaId,
+        date: new Date(t.created_at).toLocaleString('id-ID'),
+        cashier: usersMap[t.user_id] || 'Kasir',
+        event: t.location_event || 'Umum/Toko',
+        customerName: t.customer_name || 'Pelanggan Umum',
+        customerPhone: t.customer_phone || '-',
+        items: t.transaction_items.map((i:any) => ({
+            name: i.products?.name || 'Produk Dihapus',
+            price: i.price_at_purchase,
+            quantity: i.quantity
+        })),
+        subtotal,
+        discountAmount: t.discount_type === 'percent' ? (subtotal * t.discount_value / 100) : t.discount_value,
+        total: t.total_amount,
+        paymentMethod: t.payment_method,
+        note: t.note || ''
+    })
+    setShowReceipt(true)
+  }
+
+  const generatePDFBlob = async () => {
+    if (!receiptRef.current) return null
+    try {
+        await toPng(receiptRef.current, { cacheBust: true, backgroundColor: '#ffffff' })
+        await new Promise(res => setTimeout(res, 100))
+        const imgData = await toPng(receiptRef.current, { quality: 0.7, pixelRatio: 1.5, cacheBust: true, backgroundColor: '#ffffff', style: { margin: '0', transform: 'scale(1)' } })
+        const pdfWidth = 80 
+        const canvasWidth = receiptRef.current.offsetWidth
+        const canvasHeight = receiptRef.current.offsetHeight
+        const pdfHeight = (canvasHeight * pdfWidth) / canvasWidth
+        const pdf = new jsPDF('p', 'mm', [pdfWidth, pdfHeight]) 
+        pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight)
+        return pdf
+    } catch (error) {
+        return null
+    }
+  }
+
+  const downloadPDF = async () => {
+    const pdf = await generatePDFBlob()
+    if (pdf) pdf.save(`Struk_${receiptData.notaId}.pdf`)
+  }
+
+  const shareReceiptLink = async () => {
+    if (!network.online) return alert("Offline. Silakan gunakan tombol Download PDF.")
+    setIsSharing(true)
+    try {
+        const pdf = await generatePDFBlob()
+        if (!pdf) throw new Error("Gagal render")
+
+        const pdfBlob = pdf.output('blob')
+        const file = new File([pdfBlob], `Struk_${receiptData.notaId}.pdf`, { type: 'application/pdf' })
+
+        const filePath = `receipts/${receiptData.notaId}_${Date.now()}.pdf`
+        const { error: uploadError } = await supabase.storage.from('pos-images').upload(filePath, file, { contentType: 'application/pdf' })
+        if (uploadError) throw uploadError
+
+        const { data } = supabase.storage.from('pos-images').getPublicUrl(filePath)
+        const receiptUrl = data?.publicUrl
+        if (!receiptUrl) throw new Error("Gagal link")
+
+        const textToShare = `Halo Kak *${receiptData.customerName}*,\nTerima kasih telah berbelanja di *POPCIONARDES*.\n\nTotal Belanja: *Rp ${receiptData.total.toLocaleString()}*\nNo Nota: ${receiptData.notaId}\n\nBerikut link struk Anda:\n${receiptUrl}`
+        setIsSharing(false) 
+
+        if (navigator.share) await navigator.share({ title: `Struk - ${receiptData.notaId}`, text: textToShare })
+        else { await navigator.clipboard.writeText(textToShare); alert("Link tersalin ke clipboard.") }
+    } catch (error: any) {
+        setIsSharing(false)
+        if (error.name !== 'AbortError') alert("Gagal membagikan link struk.")
+    }
+  }
+
+  const getImgUrl = (path: string) => `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/pos-images/${path}`
 
   if (loading) return <div className="p-4 text-center dark:text-white">Memuat data...</div>
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-slate-900 p-4 pb-24 transition-colors">
+    <div className="min-h-screen bg-gray-50 dark:bg-slate-900 p-4 pb-24 transition-colors select-none">
       <h1 className="text-xl font-bold mb-4 text-gray-800 dark:text-white">Riwayat Transaksi</h1>
 
       <div className="space-y-4">
@@ -89,57 +200,41 @@ export default function Transactions() {
           const subtotal = t.transaction_items.reduce((acc: number, item: any) => acc + (item.price_at_purchase * item.quantity), 0)
           const hasDiscount = t.discount_value > 0
           const hasFreeItems = t.transaction_items.some((item: any) => item.price_at_purchase === 0)
-          const cashierName = usersMap[t.user_id] || 'Kasir Lama/Terhapus'
+          const cashierName = usersMap[t.user_id] || 'Kasir Lama'
 
           return (
             <div key={t.id} className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border dark:border-slate-700 overflow-hidden">
-              
-              {/* Header Card (Klik untuk expand) */}
-              <div 
-                onClick={() => setExpandedId(expandedId === t.id ? null : t.id)}
-                className="p-4 flex justify-between items-center cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-700"
-              >
+              <div onClick={() => setExpandedId(expandedId === t.id ? null : t.id)} className="p-4 flex justify-between items-center cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-700">
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-1 text-xs text-gray-500 dark:text-gray-400">
-                    <span className="flex items-center gap-1">
-                      <Calendar size={12}/> {new Date(t.created_at).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}
-                    </span>
+                    <span className="flex items-center gap-1"><Calendar size={12}/> {new Date(t.created_at).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}</span>
                     <span className="text-gray-300 dark:text-gray-600">|</span>
-                    <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400 font-medium">
-                      <User size={12}/> {cashierName}
-                    </span>
+                    <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400 font-medium"><User size={12}/> {cashierName}</span>
                   </div>
                   
                   <div className="flex items-baseline gap-2">
-                    <h3 className="font-bold text-lg text-gray-800 dark:text-white">
-                      Rp {t.total_amount.toLocaleString()}
-                    </h3>
+                    <h3 className="font-bold text-lg text-gray-800 dark:text-white">Rp {t.total_amount.toLocaleString()}</h3>
                   </div>
 
                   <div className="flex gap-2 mt-2 flex-wrap">
-                     <span className="text-[10px] bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded flex items-center gap-1">
-                        <CreditCard size={10}/> {t.payment_method}
-                     </span>
-                     {hasDiscount && (
-                       <span className="text-[10px] bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-300 px-2 py-0.5 rounded flex items-center gap-1">
-                          <Tag size={10}/> Diskon
-                       </span>
-                     )}
-                     {hasFreeItems && (
-                       <span className="text-[10px] bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5 rounded flex items-center gap-1 font-bold">
-                          <Gift size={10}/> BONUS
-                       </span>
-                     )}
+                     <span className="text-[10px] bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded flex items-center gap-1 font-bold shadow-sm uppercase"><CreditCard size={10}/> {t.payment_method}</span>
+                     {hasDiscount && <span className="text-[10px] bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-300 px-2 py-0.5 rounded flex items-center gap-1"><Tag size={10}/> Diskon</span>}
+                     {hasFreeItems && <span className="text-[10px] bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5 rounded flex items-center gap-1 font-bold"><Gift size={10}/> BONUS</span>}
+                     {t.note && <span className="text-[10px] bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 px-2 py-0.5 rounded flex items-center gap-1 font-bold">Catatan</span>}
                   </div>
                 </div>
-                <div className="pl-2">
-                  {expandedId === t.id ? <ChevronUp className="text-gray-400"/> : <ChevronDown className="text-gray-400"/>}
-                </div>
+                <div className="pl-2">{expandedId === t.id ? <ChevronUp className="text-gray-400"/> : <ChevronDown className="text-gray-400"/>}</div>
               </div>
 
-              {/* Detail Transaksi */}
               {expandedId === t.id && (
                 <div className="bg-gray-50 dark:bg-slate-900/50 p-4 border-t border-gray-100 dark:border-slate-700 animate-in slide-in-from-top-2">
+                  {(t.customer_name || t.note) && (
+                      <div className="mb-4 text-xs space-y-1 bg-white dark:bg-slate-800 p-3 rounded-lg border dark:border-slate-700 shadow-sm">
+                          {t.customer_name && <div><span className="text-gray-500">Pelanggan:</span> <span className="font-bold dark:text-white">{t.customer_name}</span> {t.customer_phone && <span className="text-blue-500">({t.customer_phone})</span>}</div>}
+                          {t.note && <div><span className="text-gray-500">Catatan:</span> <span className="font-medium text-yellow-600 dark:text-yellow-500">{t.note}</span></div>}
+                      </div>
+                  )}
+
                   <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-2 uppercase">Item Dibeli</h4>
                   <div className="space-y-2 mb-4 border-b dark:border-slate-700 pb-3">
                     {t.transaction_items.map((item: any, idx: number) => {
@@ -147,34 +242,19 @@ export default function Transactions() {
                       return (
                         <div key={idx} className={`flex justify-between text-sm p-2 rounded ${isFree ? 'bg-green-50 dark:bg-green-900/20 border border-green-100 dark:border-green-900/30' : ''}`}>
                           <div className="flex flex-col">
-                            <span className="dark:text-gray-200 font-medium">
-                              {item.products?.name} <span className="text-gray-400 font-normal">x{item.quantity}</span>
-                            </span>
+                            <span className="dark:text-gray-200 font-medium">{item.products?.name} <span className="text-gray-400 font-normal">x{item.quantity}</span></span>
                             {isFree && <span className="text-[10px] text-green-600 font-bold mt-0.5">BONUS / GRATIS</span>}
                           </div>
-                          <span className={`font-medium ${isFree ? 'text-green-600' : 'dark:text-gray-200'}`}>
-                            {isFree ? 'Rp 0' : `Rp ${(item.price_at_purchase * item.quantity).toLocaleString()}`}
-                          </span>
+                          <span className={`font-medium ${isFree ? 'text-green-600' : 'dark:text-gray-200'}`}>{isFree ? 'Rp 0' : `Rp ${(item.price_at_purchase * item.quantity).toLocaleString()}`}</span>
                         </div>
                       )
                     })}
                   </div>
 
                   <div className="space-y-1 mb-4 text-sm dark:text-gray-300">
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Subtotal</span>
-                      <span>Rp {subtotal.toLocaleString()}</span>
-                    </div>
-                    {hasDiscount && (
-                      <div className="flex justify-between text-red-500">
-                        <span>Diskon</span>
-                        <span>- Rp {(subtotal - t.total_amount).toLocaleString()}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between font-bold text-base pt-2 border-t dark:border-slate-700 mt-2">
-                      <span>Total Bayar</span>
-                      <span>Rp {t.total_amount.toLocaleString()}</span>
-                    </div>
+                    <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span>Rp {subtotal.toLocaleString()}</span></div>
+                    {hasDiscount && <div className="flex justify-between text-red-500"><span>Diskon</span><span>- Rp {(subtotal - t.total_amount).toLocaleString()}</span></div>}
+                    <div className="flex justify-between font-bold text-base pt-2 border-t dark:border-slate-700 mt-2"><span>Total Bayar</span><span>Rp {t.total_amount.toLocaleString()}</span></div>
                   </div>
 
                   {t.proof_images && t.proof_images.length > 0 && (
@@ -183,24 +263,29 @@ export default function Transactions() {
                       <div className="flex gap-2 overflow-x-auto pb-2">
                         {t.proof_images.map((img: string, i: number) => (
                           <div key={i} onClick={() => setPreviewImage(getImgUrl(img))} className="relative w-20 h-20 flex-shrink-0 cursor-pointer">
-                             <img src={getImgUrl(img)} className="w-full h-full object-cover rounded-lg border dark:border-slate-600"/>
+                             <img src={getImgUrl(img)} className="w-full h-full object-cover rounded-lg border dark:border-slate-600 shadow-sm"/>
                           </div>
                         ))}
                       </div>
                     </div>
                   )}
 
-                  {/* TOMBOL HAPUS: HANYA MUNCUL JIKA ADMIN */}
-                  {isAdmin && (
-                    <div className="flex justify-end pt-2 border-t border-gray-200 dark:border-slate-700">
-                       <button 
-                         onClick={() => deleteTransaction(t.id)}
-                         className="flex items-center gap-2 text-red-600 text-sm font-bold bg-white dark:bg-slate-800 border border-red-200 dark:border-red-900 px-3 py-2 rounded-lg hover:bg-red-50"
-                       >
-                         <Trash2 size={16}/> Hapus Data
+                  <div className="flex justify-end gap-2 pt-3 border-t border-gray-200 dark:border-slate-700">
+                       <button onClick={() => openReceipt(t)} className="flex items-center gap-2 text-blue-600 text-sm font-bold bg-white dark:bg-slate-800 border border-blue-200 dark:border-blue-900 px-3 py-2 rounded-lg hover:bg-blue-50 shadow-sm">
+                         <Printer size={16}/> Struk
                        </button>
-                    </div>
-                  )}
+
+                       {isAdmin && (
+                           <>
+                           <button onClick={() => handleEdit(t)} className="flex items-center gap-2 text-orange-600 text-sm font-bold bg-white dark:bg-slate-800 border border-orange-200 dark:border-orange-900 px-3 py-2 rounded-lg hover:bg-orange-50 shadow-sm">
+                             <Edit size={16}/> Edit
+                           </button>
+                           <button onClick={() => deleteTransaction(t.id)} className="flex items-center gap-2 text-red-600 text-sm font-bold bg-white dark:bg-slate-800 border border-red-200 dark:border-red-900 px-3 py-2 rounded-lg hover:bg-red-50 shadow-sm">
+                             <Trash2 size={16}/> Hapus
+                           </button>
+                           </>
+                       )}
+                  </div>
                 </div>
               )}
             </div>
@@ -212,6 +297,119 @@ export default function Transactions() {
         <div className="fixed inset-0 z-[60] bg-black/95 flex items-center justify-center p-4" onClick={() => setPreviewImage(null)}>
           <button onClick={() => setPreviewImage(null)} className="absolute top-4 right-4 bg-white/10 text-white p-2 rounded-full"><X size={24} /></button>
           <img src={previewImage} alt="Full" className="max-w-full max-h-[85vh] object-contain rounded-lg"/>
+        </div>
+      )}
+
+      {/* --- MODAL EDIT TRANSAKSI --- */}
+      {editModal && editData && (
+        <div className="fixed inset-0 z-[99] bg-black/80 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-800 w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-in fade-in zoom-in duration-200">
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-lg dark:text-white">Edit Transaksi</h3>
+                    <button onClick={() => setEditModal(false)} className="text-gray-400 hover:text-red-500"><X size={24}/></button>
+                </div>
+                <div className="mb-4 text-[10px] text-yellow-600 bg-yellow-50 p-2 rounded border border-yellow-200 text-justify leading-tight">
+                    *Untuk menjaga sinkronisasi stok, <b>edit isi barang tidak diizinkan</b>. Jika barang salah, klik <b>Hapus</b> (Void) transaksi ini.
+                </div>
+                <form onSubmit={saveEdit} className="space-y-4">
+                    <div className="grid grid-cols-2 gap-2">
+                        <div>
+                            <label className="text-xs font-bold text-gray-500">Metode Bayar</label>
+                            <select className="w-full border p-2 rounded-xl bg-gray-50 dark:bg-slate-700 dark:text-white dark:border-slate-600 focus:ring-2 focus:ring-pop-green outline-none" value={editData.payment_method} onChange={e => setEditData({...editData, payment_method: e.target.value})}>
+                                <option value="cash">Cash</option><option value="transfer">Transfer</option><option value="split">Split</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="text-xs font-bold text-gray-500">Lokasi / Event</label>
+                            <input type="text" className="w-full border p-2 rounded-xl bg-gray-50 dark:bg-slate-700 dark:text-white dark:border-slate-600 focus:ring-2 focus:ring-pop-green outline-none" value={editData.location_event} onChange={e => setEditData({...editData, location_event: e.target.value})} />
+                        </div>
+                    </div>
+                    <div>
+                        <label className="text-xs font-bold text-gray-500">Catatan / Note</label>
+                        <input type="text" placeholder="Kosong..." className="w-full border p-2 rounded-xl bg-gray-50 dark:bg-slate-700 dark:text-white dark:border-slate-600 focus:ring-2 focus:ring-pop-green outline-none" value={editData.note} onChange={e => setEditData({...editData, note: e.target.value})} />
+                    </div>
+                    <div className="border-t dark:border-slate-700 pt-2 mt-2">
+                        <label className="text-xs font-bold text-gray-500">Nama Pelanggan</label>
+                        <input type="text" placeholder="Kosong..." className="w-full border p-2 rounded-xl bg-gray-50 dark:bg-slate-700 dark:text-white dark:border-slate-600 mb-3 focus:ring-2 focus:ring-pop-green outline-none" value={editData.customer_name} onChange={e => setEditData({...editData, customer_name: e.target.value})} />
+                        
+                        <label className="text-xs font-bold text-gray-500">No. HP Pelanggan</label>
+                        <input type="text" placeholder="Kosong..." className="w-full border p-2 rounded-xl bg-gray-50 dark:bg-slate-700 dark:text-white dark:border-slate-600 focus:ring-2 focus:ring-pop-green outline-none" value={editData.customer_phone} onChange={e => setEditData({...editData, customer_phone: e.target.value})} />
+                    </div>
+                    
+                    <button type="submit" className="w-full bg-pop-green hover:bg-pop-green-dark text-white py-3 rounded-xl font-bold text-sm flex justify-center mt-4 transition-colors">
+                        Simpan Perubahan
+                    </button>
+                </form>
+            </div>
+        </div>
+      )}
+
+      {/* --- MODAL CETAK ULANG STRUK --- */}
+      {showReceipt && receiptData && (
+        <div className="fixed inset-0 z-[100] bg-black/90 flex flex-col items-center justify-center p-4 overflow-y-auto">
+            <h2 className="text-white font-bold text-xl mb-4 mt-20">Struk Salinan (Copy)</h2>
+            
+            <div className="bg-white p-5 max-w-[300px] w-full mx-auto shadow-2xl shrink-0" ref={receiptRef} style={{fontFamily: 'monospace', color: '#000000', backgroundColor: '#ffffff'}}>
+                <div className="text-center mb-4">
+                    <h1 className="font-bold text-xl tracking-widest">POPCIONARDES</h1>
+                    <p className="text-[10px] uppercase">Bekasi, West Java, Indonesia</p>
+                </div>
+                <div className="border-t border-dashed border-gray-400 my-2"></div>
+                <div className="text-[10px] space-y-1">
+                    <div className="flex justify-between"><span>No:</span><span className="font-bold">{receiptData.notaId}</span></div>
+                    <div className="flex justify-between"><span>Tgl:</span><span>{receiptData.date}</span></div>
+                    <div className="flex justify-between"><span>Kasir:</span><span>{receiptData.cashier}</span></div>
+                    <div className="flex justify-between"><span>Event:</span><span>{receiptData.event}</span></div>
+                </div>
+                <div className="border-t border-dashed border-gray-400 my-2"></div>
+                <div className="text-[10px] space-y-1 mb-2">
+                    <div className="flex justify-between"><span>Pelanggan:</span><span className="font-bold">{receiptData.customerName}</span></div>
+                    <div className="flex justify-between"><span>HP:</span><span>{receiptData.customerPhone}</span></div>
+                </div>
+                <div className="border-t-2 border-black my-2"></div>
+                
+                <div className="text-[10px] font-bold mb-1">DETAIL BELANJA:</div>
+                <div className="text-[10px] space-y-2">
+                    {receiptData.items.map((item: any, idx: number) => (
+                        <div key={idx}>
+                            <div className="flex justify-between">
+                                <span className="font-bold truncate pr-2 w-3/4">{item.quantity}x {item.name}</span>
+                                <span>{(item.price * item.quantity).toLocaleString()}</span>
+                            </div>
+                            <div className="pl-4 text-gray-500">@ Rp {item.price.toLocaleString()}</div>
+                        </div>
+                    ))}
+                </div>
+                
+                <div className="border-t border-dashed border-gray-400 my-2"></div>
+                <div className="text-[10px] space-y-1">
+                    <div className="flex justify-between"><span>Subtotal:</span><span>{receiptData.subtotal.toLocaleString()}</span></div>
+                    <div className="flex justify-between text-red-500"><span>Diskon:</span><span>-{receiptData.discountAmount.toLocaleString()}</span></div>
+                </div>
+                <div className="border-t-2 border-black my-2"></div>
+                <div className="flex justify-between font-bold text-sm"><span>TOTAL BAYAR:</span><span>Rp {receiptData.total.toLocaleString()}</span></div>
+                <div className="flex justify-between text-[10px] mt-1"><span>Pembayaran:</span><span className="uppercase font-bold">{receiptData.paymentMethod}</span></div>
+                {receiptData.note && <div className="flex justify-between text-[10px] mt-1"><span>Catatan:</span><span className="font-bold text-right">{receiptData.note}</span></div>}
+                
+                <div className="border-t border-dashed border-gray-400 my-4"></div>
+                <div className="text-center text-[10px]">
+                    <div className="font-bold">*** COPY RECEIPT ***</div>
+                    <div>Struk ini adalah bukti resmi</div>
+                </div>
+            </div>
+
+            <div className="flex gap-2 mt-6 mb-10 w-full max-w-[300px] shrink-0">
+                <button onClick={downloadPDF} className="flex-1 bg-white text-gray-800 py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-gray-100 text-sm shadow-lg">
+                    <Download size={18}/> Download
+                </button>
+                <button onClick={shareReceiptLink} disabled={isSharing} className="flex-[2] bg-blue-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-blue-700 shadow-lg shadow-blue-500/30 text-sm disabled:bg-gray-500 transition-colors">
+                    {isSharing ? 'Memproses...' : <><Share2 size={18}/> Bagikan Ulang</>}
+                </button>
+            </div>
+            
+            <button onClick={() => setShowReceipt(false)} className="mb-10 text-gray-400 underline text-sm hover:text-white shrink-0">
+                Tutup Struk
+            </button>
         </div>
       )}
     </div>

@@ -2,7 +2,8 @@
 import { useEffect, useState, useMemo } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Calendar, MapPin, TrendingUp, BarChart3 } from 'lucide-react'
+import Papa from 'papaparse' 
+import { ArrowLeft, Calendar, MapPin, TrendingUp, BarChart3, Download } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 
 export default function ReportPage() {
@@ -17,13 +18,27 @@ export default function ReportPage() {
     fetchData()
   }, [])
 
+  // MENGAMBIL DATA TRANSAKSI + DETAIL PRODUK YANG DIBELI
   const fetchData = async () => {
-    const { data } = await supabase.from('transactions').select('*').order('created_at', { ascending: true })
+    const { data, error } = await supabase
+      .from('transactions')
+      .select(`
+        *,
+        transaction_items (
+          quantity,
+          price_at_purchase,
+          products ( name )
+        )
+      `)
+      .order('created_at', { ascending: true })
+
+    if (error) console.error("Error fetch data:", error)
     if (data) setTransactions(data)
+    
     setLoading(false)
   }
 
-  // --- LOGIKA PENGOLAHAN DATA UNTUK GRAFIK ---
+  // --- LOGIKA PENGOLAHAN DATA UNTUK GRAFIK (REKAP) ---
   const chartData = useMemo(() => {
     if (transactions.length === 0) return []
 
@@ -34,43 +49,106 @@ export default function ReportPage() {
       let key = ''
 
       if (filterType === 'daily') {
-        // Format: "15 Jan"
         key = date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
       } else if (filterType === 'monthly') {
-        // Format: "Januari"
         key = date.toLocaleDateString('id-ID', { month: 'long' })
       } else if (filterType === 'event') {
-        // Format: Nama Lokasi (Jika kosong = Umum)
         key = t.location_event || 'Umum/Toko'
       }
 
-      // Jumlahkan Total Amount per Kategori
       groupedData[key] = (groupedData[key] || 0) + t.total_amount
     })
 
-    // Ubah Object ke Array untuk Recharts
-    // Contoh: [{ name: '15 Jan', total: 500000 }, ...]
     return Object.keys(groupedData).map(key => ({
       name: key,
       total: groupedData[key]
     }))
   }, [transactions, filterType])
 
-  // Hitung Total Keseluruhan berdasarkan filter saat ini
   const totalRevenue = chartData.reduce((acc, curr) => acc + curr.total, 0)
 
-  // Warna Grafik
+  // --- FUNGSI EXPORT LAPORAN KE CSV (DIPERBARUI) ---
+  const handleExportReport = () => {
+    if (chartData.length === 0) return alert("Tidak ada data untuk diexport.")
+
+    let csvData: any[] = []
+
+    if (filterType === 'daily') {
+      // 1. FORMAT EXPORT DETAIL (HARIAN)
+      transactions.forEach((t) => {
+        const dateStr = new Date(t.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
+        const timeStr = new Date(t.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+        
+        // Cek jika ada item produk di dalam transaksi
+        if (t.transaction_items && t.transaction_items.length > 0) {
+          t.transaction_items.forEach((item: any) => {
+            csvData.push({
+              'Tanggal': dateStr,
+              'Waktu': timeStr,
+              'Lokasi / Event': t.location_event || 'Umum/Toko',
+              'Metode Bayar': t.payment_method === 'cash' ? 'Cash' : 'Transfer',
+              'Nama Produk': item.products?.name || 'Produk Dihapus',
+              'Harga Satuan (Rp)': item.price_at_purchase,
+              'Qty Terjual': item.quantity,
+              'Subtotal (Rp)': item.price_at_purchase * item.quantity,
+              'Diskon Nota': t.discount_value > 0 ? `${t.discount_value} ${t.discount_type === 'percent' ? '%' : 'Rp'}` : '0',
+              'Total Bayar Akhir (Rp)': t.total_amount
+            })
+          })
+        }
+      })
+    } else {
+      // 2. FORMAT EXPORT REKAP (BULANAN & EVENT)
+      let kolomKategori = filterType === 'monthly' ? 'Bulan' : 'Nama Event / Lokasi'
+      csvData = chartData.map((item, index) => ({
+        'No': index + 1,
+        [kolomKategori]: item.name,
+        'Total Penjualan (Rp)': item.total
+      }))
+    }
+
+    // Mengubah JSON ke format string CSV
+    const csvString = Papa.unparse(csvData)
+
+    // Proses download file browser
+    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    
+    const namaFile = `Laporan_Omset_${filterType === 'daily' ? 'Harian_Detail' : filterType === 'monthly' ? 'Bulanan' : 'Event'}_${new Date().toISOString().split('T')[0]}.csv`
+    
+    link.setAttribute("href", url)
+    link.setAttribute("download", namaFile)
+    link.style.visibility = 'hidden'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
   const COLORS = ['#00a651', '#00C49F', '#FFBB28', '#FF8042', '#0088FE']
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-900 pb-20 transition-colors">
       
       {/* HEADER */}
-      <div className="bg-white dark:bg-slate-800 p-4 sticky top-0 z-10 shadow-sm flex items-center gap-3">
-        <button onClick={() => router.back()} className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-full text-gray-600 dark:text-white">
-            <ArrowLeft size={24} />
-        </button>
-        <h1 className="font-bold text-lg text-gray-800 dark:text-white">Laporan Penjualan</h1>
+      <div className="bg-white dark:bg-slate-800 p-4 sticky top-0 z-10 shadow-sm flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <button onClick={() => router.back()} className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-full text-gray-600 dark:text-white">
+              <ArrowLeft size={24} />
+          </button>
+          <h1 className="font-bold text-lg text-gray-800 dark:text-white">Laporan Penjualan</h1>
+        </div>
+        
+        {/* TOMBOL EXPORT */}
+        {!loading && chartData.length > 0 && (
+          <button 
+            onClick={handleExportReport}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-xl text-sm font-bold shadow transition-all"
+            title="Download Laporan CSV"
+          >
+            <Download size={16} /> <span>Export</span>
+          </button>
+        )}
       </div>
 
       <div className="p-4 space-y-6">
