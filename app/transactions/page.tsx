@@ -61,10 +61,19 @@ export default function Transactions() {
   }
 
   const fetchTransactions = async () => {
+    // Hitung tanggal 30 hari yang lalu
+    const thirtyDaysAgo = new Date()
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+    const startDateString = thirtyDaysAgo.toISOString()
+
+    // Tarik data hanya dari 30 hari terakhir dengan batas maksimal 1000 transaksi agar aman
     const { data } = await supabase
       .from('transactions')
       .select(`*, transaction_items ( quantity, price_at_purchase, products ( name ) )`)
+      .gte('created_at', startDateString)
       .order('created_at', { ascending: false })
+      .limit(1000)
+
     if (data) setTransactions(data)
   }
 

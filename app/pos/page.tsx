@@ -9,6 +9,7 @@ import { db } from '@/utils/db'
 import { toPng } from 'html-to-image' 
 import jsPDF from 'jspdf'
 import toast from 'react-hot-toast'
+import imageCompression from 'browser-image-compression'
 
 export default function POS() {
   const network = useNetwork()
@@ -195,9 +196,28 @@ export default function POS() {
       }
 
       const urls: string[] = []
+      const compressionOptions = {
+          maxSizeMB: 0.5, // Maksimal ukuran file 500KB
+          maxWidthOrHeight: 1280, // Resolusi maksimal HD
+          useWebWorker: true // Gunakan CPU latar belakang agar tidak ngelag
+      }
+
       for (const file of proofFiles) {
-          const ext = file.name.split('.').pop(); const name = `${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`
-          const { data } = await supabase.storage.from('pos-images').upload(name, file); if (data) urls.push(data.path)
+          try {
+              // Proses kompresi gambar sebelum diupload
+              const compressedFile = await imageCompression(file, compressionOptions)
+              
+              const ext = file.name.split('.').pop()
+              const name = `${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`
+              
+              const { data, error: uploadErr } = await supabase.storage
+                .from('pos-images')
+                .upload(name, compressedFile)
+                
+              if (data) urls.push(data.path)
+          } catch (compressErr) {
+              console.error("Gagal mengompres gambar:", compressErr)
+          }
       }
 
       const { data: trans, error } = await supabase.from('transactions').insert({
