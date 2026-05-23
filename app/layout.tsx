@@ -1,23 +1,22 @@
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
-import { Providers } from './providers'
-import BottomNav from '@/components/BottomNav' // <-- Import ini
+import BottomNav from '@/components/BottomNav'
 import OfflineSync from '@/components/OfflineSync'
+import { Providers } from './providers' // IMPORT PROVIDER BARU
 
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
   title: 'Popcionardes POS',
-  description: 'Aplikasi Kasir POPCionardes',
+  description: 'Offline-First POS System',
   manifest: '/manifest.json',
-  icons: {
-    apple: '/icon.ico',
+  themeColor: '#00a651',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'Popcionardes',
   },
-  // Tambahkan ini sebagai cadangan:
-  other: {
-    "mobile-web-app-capable": "yes",
-  }
 }
 
 export default function RootLayout({
@@ -26,15 +25,15 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      {/* PINDAHKAN KELAS CSS DARI globals.css KE SINI: */}
-      <body className={`${inter.className} bg-gray-50 dark:bg-slate-900 text-gray-900 dark:text-gray-100 transition-colors duration-300`}>
-        <OfflineSync />
+    // SUPPRESS HYDRATION WARNING PENTING UNTUK NEXT-THEMES
+    <html lang="id" suppressHydrationWarning>
+      <body className={`${inter.className} bg-gray-50 dark:bg-slate-900 transition-colors duration-300 ease-in-out antialiased`}>
         <Providers>
-          <main className="pb-20">
+          <div className="max-w-5xl mx-auto bg-white dark:bg-slate-900 min-h-screen shadow-2xl relative overflow-hidden transition-colors duration-300">
             {children}
-          </main>
-          <BottomNav />
+            <OfflineSync />
+            <BottomNav />
+          </div>
         </Providers>
       </body>
     </html>

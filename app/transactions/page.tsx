@@ -1,8 +1,8 @@
 'use client'
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { useRouter } from 'next/navigation'
-import { Calendar, CreditCard, ChevronDown, ChevronUp, Trash2, X, Tag, Gift, User, Edit, Printer, Download, Share2 } from 'lucide-react'
+import { Calendar, CreditCard, ChevronDown, ChevronUp, Trash2, X, Tag, Gift, User, Edit, Printer, Download, Share2, Search, Filter, RefreshCcw } from 'lucide-react'
 import { toPng } from 'html-to-image' 
 import jsPDF from 'jspdf'
 import { useNetwork } from '@/hooks/useNetwork'
@@ -23,6 +23,15 @@ export default function Transactions() {
   const [isSharing, setIsSharing] = useState(false)
   const receiptRef = useRef<HTMLDivElement>(null)
   const network = useNetwork()
+
+  // --- STATE FILTER & SORTING ---
+  const [showFilters, setShowFilters] = useState(false)
+  const [search, setSearch] = useState('')
+  const [filterEvent, setFilterEvent] = useState('')
+  const [filterPayment, setFilterPayment] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [sortBy, setSortBy] = useState('date-desc')
 
   const supabase = createClient()
   const router = useRouter()
@@ -59,53 +68,30 @@ export default function Transactions() {
     if (data) setTransactions(data)
   }
 
-  // --- PERBAIKAN 1: Optimistic Update Hapus ---
   const deleteTransaction = async (id: string) => {
     if(!confirm('Hapus (Void) transaksi ini? Stok tidak akan kembali otomatis.')) return
     if (!isAdmin) return alert("Akses Ditolak: Hanya Admin yang boleh menghapus.")
 
     const { error } = await supabase.from('transactions').delete().eq('id', id)
     if (error) alert("Gagal menghapus! " + error.message)
-    else {
-        // Hapus dari UI seketika tanpa nunggu reload DB
-        setTransactions(prev => prev.filter(t => t.id !== id))
-    }
+    else setTransactions(prev => prev.filter(t => t.id !== id))
   }
 
   const handleEdit = (t: any) => {
-    setEditData({
-        id: t.id,
-        payment_method: t.payment_method,
-        note: t.note || '',
-        location_event: t.location_event || '',
-        customer_name: t.customer_name || '',
-        customer_phone: t.customer_phone || ''
-    })
+    setEditData({ id: t.id, payment_method: t.payment_method, note: t.note || '', location_event: t.location_event || '', customer_name: t.customer_name || '', customer_phone: t.customer_phone || '' })
     setEditModal(true)
   }
 
-  // --- PERBAIKAN 2: Optimistic Update Edit ---
   const saveEdit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
-    // 1. Update ke Supabase
     const { error } = await supabase.from('transactions').update({
-        payment_method: editData.payment_method,
-        note: editData.note,
-        location_event: editData.location_event,
-        customer_name: editData.customer_name,
-        customer_phone: editData.customer_phone
+        payment_method: editData.payment_method, note: editData.note, location_event: editData.location_event, customer_name: editData.customer_name, customer_phone: editData.customer_phone
     }).eq('id', editData.id)
 
-    if(error) {
-        alert("Gagal update: " + error.message)
-    } else {
-        // 2. FORCE REFRESH: Kita paksa fetch ulang data terbaru dari database
-        // Ini memastikan cache lama dibuang dan data baru masuk
-        await fetchTransactions()
-        
-        setEditModal(false)
-        alert("Data berhasil diupdate dan disinkronisasi!")
+    if(error) alert("Gagal update: " + error.message)
+    else {
+        setTransactions(prev => prev.map(t => t.id === editData.id ? { ...t, ...editData } : t))
+        setEditModal(false); alert("Data berhasil diupdate!")
     }
   }
 
@@ -115,22 +101,10 @@ export default function Transactions() {
     const notaId = `TR-${timeMillis.slice(-8)}`
     
     setReceiptData({
-        notaId: notaId,
-        date: new Date(t.created_at).toLocaleString('id-ID'),
-        cashier: usersMap[t.user_id] || 'Kasir',
-        event: t.location_event || 'Umum/Toko',
-        customerName: t.customer_name || 'Pelanggan Umum',
-        customerPhone: t.customer_phone || '-',
-        items: t.transaction_items.map((i:any) => ({
-            name: i.products?.name || 'Produk Dihapus',
-            price: i.price_at_purchase,
-            quantity: i.quantity
-        })),
-        subtotal,
-        discountAmount: t.discount_type === 'percent' ? (subtotal * t.discount_value / 100) : t.discount_value,
-        total: t.total_amount,
-        paymentMethod: t.payment_method,
-        note: t.note || ''
+        notaId: notaId, date: new Date(t.created_at).toLocaleString('id-ID'), cashier: usersMap[t.user_id] || 'Kasir', event: t.location_event || 'Umum/Toko',
+        customerName: t.customer_name || 'Pelanggan Umum', customerPhone: t.customer_phone || '-',
+        items: t.transaction_items.map((i:any) => ({ name: i.products?.name || 'Produk Dihapus', price: i.price_at_purchase, quantity: i.quantity })),
+        subtotal, discountAmount: t.discount_type === 'percent' ? (subtotal * t.discount_value / 100) : t.discount_value, total: t.total_amount, paymentMethod: t.payment_method, note: t.note || ''
     })
     setShowReceipt(true)
   }
@@ -148,55 +122,176 @@ export default function Transactions() {
         const pdf = new jsPDF('p', 'mm', [pdfWidth, pdfHeight]) 
         pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight)
         return pdf
-    } catch (error) {
-        return null
-    }
+    } catch (error) { return null }
   }
 
-  const downloadPDF = async () => {
-    const pdf = await generatePDFBlob()
-    if (pdf) pdf.save(`Struk_${receiptData.notaId}.pdf`)
-  }
+  const downloadPDF = async () => { const pdf = await generatePDFBlob(); if (pdf) pdf.save(`Struk_${receiptData.notaId}.pdf`) }
 
   const shareReceiptLink = async () => {
     if (!network.online) return alert("Offline. Silakan gunakan tombol Download PDF.")
     setIsSharing(true)
     try {
-        const pdf = await generatePDFBlob()
-        if (!pdf) throw new Error("Gagal render")
-
-        const pdfBlob = pdf.output('blob')
-        const file = new File([pdfBlob], `Struk_${receiptData.notaId}.pdf`, { type: 'application/pdf' })
-
+        const pdf = await generatePDFBlob(); if (!pdf) throw new Error("Gagal render")
+        const pdfBlob = pdf.output('blob'); const file = new File([pdfBlob], `Struk_${receiptData.notaId}.pdf`, { type: 'application/pdf' })
         const filePath = `receipts/${receiptData.notaId}_${Date.now()}.pdf`
         const { error: uploadError } = await supabase.storage.from('pos-images').upload(filePath, file, { contentType: 'application/pdf' })
         if (uploadError) throw uploadError
-
         const { data } = supabase.storage.from('pos-images').getPublicUrl(filePath)
-        const receiptUrl = data?.publicUrl
-        if (!receiptUrl) throw new Error("Gagal link")
-
+        const receiptUrl = data?.publicUrl; if (!receiptUrl) throw new Error("Gagal link")
         const textToShare = `Halo Kak *${receiptData.customerName}*,\nTerima kasih telah berbelanja di *POPCIONARDES*.\n\nTotal Belanja: *Rp ${receiptData.total.toLocaleString()}*\nNo Nota: ${receiptData.notaId}\n\nBerikut link struk Anda:\n${receiptUrl}`
         setIsSharing(false) 
-
         if (navigator.share) await navigator.share({ title: `Struk - ${receiptData.notaId}`, text: textToShare })
         else { await navigator.clipboard.writeText(textToShare); alert("Link tersalin ke clipboard.") }
-    } catch (error: any) {
-        setIsSharing(false)
-        if (error.name !== 'AbortError') alert("Gagal membagikan link struk.")
-    }
+    } catch (error: any) { setIsSharing(false); if (error.name !== 'AbortError') alert("Gagal membagikan link struk.") }
   }
 
   const getImgUrl = (path: string) => `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/pos-images/${path}`
+
+  // ==========================================
+  // LOGIKA MULTIPLE FILTER & SORTING
+  // ==========================================
+  const uniqueEvents = Array.from(new Set(transactions.map(t => t.location_event || 'Umum/Toko')))
+
+  const processedData = useMemo(() => {
+    let result = [...transactions]
+
+    // 1. Search Filter (Customer Name atau Note)
+    if (search) {
+        const s = search.toLowerCase()
+        result = result.filter(t => 
+            (t.customer_name?.toLowerCase() || '').includes(s) || 
+            (t.note?.toLowerCase() || '').includes(s)
+        )
+    }
+
+    // 2. Event Filter
+    if (filterEvent) {
+        result = result.filter(t => (t.location_event || 'Umum/Toko') === filterEvent)
+    }
+
+    // 3. Payment Filter
+    if (filterPayment) {
+        result = result.filter(t => t.payment_method === filterPayment)
+    }
+
+    // 4. Date Filter (From - To)
+    if (dateFrom) {
+        result = result.filter(t => new Date(t.created_at) >= new Date(dateFrom + 'T00:00:00'))
+    }
+    if (dateTo) {
+        result = result.filter(t => new Date(t.created_at) <= new Date(dateTo + 'T23:59:59'))
+    }
+
+    // 5. Sorting
+    result.sort((a, b) => {
+        if (sortBy === 'date-desc') return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        if (sortBy === 'date-asc') return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        if (sortBy === 'amount-desc') return b.total_amount - a.total_amount
+        if (sortBy === 'amount-asc') return a.total_amount - b.total_amount
+        return 0
+    })
+
+    return result
+  }, [transactions, search, filterEvent, filterPayment, dateFrom, dateTo, sortBy])
+
+  // Ringkasan Dinamis
+  const filteredTotalAmount = processedData.reduce((sum, t) => sum + t.total_amount, 0)
+
+  const resetFilters = () => {
+      setSearch(''); setFilterEvent(''); setFilterPayment(''); setDateFrom(''); setDateTo(''); setSortBy('date-desc');
+  }
 
   if (loading) return <div className="p-4 text-center dark:text-white">Memuat data...</div>
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-900 p-4 pb-24 transition-colors select-none">
-      <h1 className="text-xl font-bold mb-4 text-gray-800 dark:text-white">Riwayat Transaksi</h1>
+      
+      {/* HEADER */}
+      <div className="flex justify-between items-center mb-4">
+          <h1 className="text-xl font-bold text-gray-800 dark:text-white">Riwayat Transaksi</h1>
+          <button 
+            onClick={() => setShowFilters(!showFilters)} 
+            className={`p-2 rounded-xl border flex items-center gap-2 text-sm font-medium transition-colors ${showFilters ? 'bg-blue-50 border-blue-200 text-blue-600 dark:bg-blue-900/30 dark:border-blue-800 dark:text-blue-400' : 'bg-white border-gray-200 text-gray-600 dark:bg-slate-800 dark:border-slate-700 dark:text-gray-300'}`}
+          >
+              <Filter size={18} /> {showFilters ? 'Tutup Filter' : 'Filter'}
+          </button>
+      </div>
 
+      {/* PANEL FILTER & SORTING */}
+      <div className={`overflow-hidden transition-all duration-300 ease-in-out ${showFilters ? 'max-h-[600px] opacity-100 mb-6' : 'max-h-0 opacity-0 mb-0'}`}>
+          <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm border dark:border-slate-700 space-y-4">
+              
+              {/* Baris 1: Search & Sort */}
+              <div className="flex flex-col md:flex-row gap-3">
+                  <div className="relative flex-1">
+                      <Search className="absolute left-3 top-3 text-gray-400" size={18} />
+                      <input 
+                        type="text" placeholder="Cari Nama Pelanggan atau Catatan..." 
+                        className="w-full pl-9 p-2.5 rounded-xl border text-sm dark:border-slate-600 bg-gray-50 dark:bg-slate-700 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                        value={search} onChange={e => setSearch(e.target.value)}
+                      />
+                  </div>
+                  <select 
+                    className="border p-2.5 rounded-xl text-sm bg-gray-50 dark:bg-slate-700 dark:text-white dark:border-slate-600 outline-none focus:ring-2 focus:ring-blue-500 md:w-48"
+                    value={sortBy} onChange={e => setSortBy(e.target.value)}
+                  >
+                      <option value="date-desc">Paling Baru</option>
+                      <option value="date-asc">Paling Lama</option>
+                      <option value="amount-desc">Nominal Tertinggi</option>
+                      <option value="amount-asc">Nominal Terendah</option>
+                  </select>
+              </div>
+
+              {/* Baris 2: Multiple Filters */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div>
+                      <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">Event / Lokasi</label>
+                      <select className="w-full border p-2.5 rounded-xl text-sm bg-gray-50 dark:bg-slate-700 dark:text-white dark:border-slate-600 outline-none mt-1" value={filterEvent} onChange={e => setFilterEvent(e.target.value)}>
+                          <option value="">Semua Event</option>
+                          {uniqueEvents.map((evt, idx) => <option key={idx} value={evt}>{evt}</option>)}
+                      </select>
+                  </div>
+                  <div>
+                      <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">Pembayaran</label>
+                      <select className="w-full border p-2.5 rounded-xl text-sm bg-gray-50 dark:bg-slate-700 dark:text-white dark:border-slate-600 outline-none mt-1" value={filterPayment} onChange={e => setFilterPayment(e.target.value)}>
+                          <option value="">Semua Metode</option>
+                          <option value="cash">Cash</option><option value="transfer">Transfer</option><option value="split">Split</option>
+                      </select>
+                  </div>
+                  <div>
+                      <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">Dari Tanggal</label>
+                      <input type="date" className="w-full border p-2 rounded-xl text-sm bg-gray-50 dark:bg-slate-700 dark:text-white dark:border-slate-600 outline-none mt-1" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+                  </div>
+                  <div>
+                      <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">Sampai Tanggal</label>
+                      <input type="date" className="w-full border p-2 rounded-xl text-sm bg-gray-50 dark:bg-slate-700 dark:text-white dark:border-slate-600 outline-none mt-1" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+                  </div>
+              </div>
+
+              {/* Baris 3: Reset Button */}
+              <div className="flex justify-end pt-2 border-t dark:border-slate-700 mt-2">
+                  <button onClick={resetFilters} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white transition-colors">
+                      <RefreshCcw size={14}/> Reset Filter
+                  </button>
+              </div>
+          </div>
+      </div>
+
+      {/* RINGKASAN DINAMIS */}
+      <div className="flex justify-between items-center mb-4 px-1">
+          <div className="text-xs font-bold text-gray-500 dark:text-gray-400">
+              Menampilkan {processedData.length} Transaksi
+          </div>
+          <div className="text-sm font-bold text-pop-green dark:text-green-400 bg-green-50 dark:bg-green-900/20 px-3 py-1 rounded-lg border border-green-100 dark:border-green-900/50">
+              Total: Rp {filteredTotalAmount.toLocaleString()}
+          </div>
+      </div>
+
+      {/* DAFTAR TRANSAKSI KARTU */}
       <div className="space-y-4">
-        {transactions.map((t) => {
+        {processedData.length === 0 ? (
+            <div className="text-center text-gray-400 py-10 bg-white dark:bg-slate-800 rounded-xl border border-dashed dark:border-slate-700">Tidak ada transaksi yang sesuai dengan filter.</div>
+        ) : processedData.map((t) => {
           const subtotal = t.transaction_items.reduce((acc: number, item: any) => acc + (item.price_at_purchase * item.quantity), 0)
           const hasDiscount = t.discount_value > 0
           const hasFreeItems = t.transaction_items.some((item: any) => item.price_at_purchase === 0)
@@ -204,7 +299,7 @@ export default function Transactions() {
 
           return (
             <div key={t.id} className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border dark:border-slate-700 overflow-hidden">
-              <div onClick={() => setExpandedId(expandedId === t.id ? null : t.id)} className="p-4 flex justify-between items-center cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-700">
+              <div onClick={() => setExpandedId(expandedId === t.id ? null : t.id)} className="p-4 flex justify-between items-center cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors">
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-1 text-xs text-gray-500 dark:text-gray-400">
                     <span className="flex items-center gap-1"><Calendar size={12}/> {new Date(t.created_at).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}</span>
@@ -217,10 +312,10 @@ export default function Transactions() {
                   </div>
 
                   <div className="flex gap-2 mt-2 flex-wrap">
-                     <span className="text-[10px] bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded flex items-center gap-1 font-bold shadow-sm uppercase"><CreditCard size={10}/> {t.payment_method}</span>
+                     <span className={`text-[10px] px-2 py-0.5 rounded flex items-center gap-1 font-bold shadow-sm uppercase ${t.payment_method === 'split' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'}`}><CreditCard size={10}/> {t.payment_method}</span>
+                     {t.location_event && <span className="text-[10px] bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded border dark:border-slate-600">{t.location_event}</span>}
                      {hasDiscount && <span className="text-[10px] bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-300 px-2 py-0.5 rounded flex items-center gap-1"><Tag size={10}/> Diskon</span>}
                      {hasFreeItems && <span className="text-[10px] bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5 rounded flex items-center gap-1 font-bold"><Gift size={10}/> BONUS</span>}
-                     {t.note && <span className="text-[10px] bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 px-2 py-0.5 rounded flex items-center gap-1 font-bold">Catatan</span>}
                   </div>
                 </div>
                 <div className="pl-2">{expandedId === t.id ? <ChevronUp className="text-gray-400"/> : <ChevronDown className="text-gray-400"/>}</div>
@@ -281,7 +376,7 @@ export default function Transactions() {
                              <Edit size={16}/> Edit
                            </button>
                            <button onClick={() => deleteTransaction(t.id)} className="flex items-center gap-2 text-red-600 text-sm font-bold bg-white dark:bg-slate-800 border border-red-200 dark:border-red-900 px-3 py-2 rounded-lg hover:bg-red-50 shadow-sm">
-                             <Trash2 size={16}/> Hapus
+                             <Trash2 size={16}/> Void
                            </button>
                            </>
                        )}
@@ -293,6 +388,7 @@ export default function Transactions() {
         })}
       </div>
 
+      {/* MODALS */}
       {previewImage && (
         <div className="fixed inset-0 z-[60] bg-black/95 flex items-center justify-center p-4" onClick={() => setPreviewImage(null)}>
           <button onClick={() => setPreviewImage(null)} className="absolute top-4 right-4 bg-white/10 text-white p-2 rounded-full"><X size={24} /></button>
@@ -300,7 +396,6 @@ export default function Transactions() {
         </div>
       )}
 
-      {/* --- MODAL EDIT TRANSAKSI --- */}
       {editModal && editData && (
         <div className="fixed inset-0 z-[99] bg-black/80 flex items-center justify-center p-4">
             <div className="bg-white dark:bg-slate-800 w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-in fade-in zoom-in duration-200">
@@ -309,7 +404,7 @@ export default function Transactions() {
                     <button onClick={() => setEditModal(false)} className="text-gray-400 hover:text-red-500"><X size={24}/></button>
                 </div>
                 <div className="mb-4 text-[10px] text-yellow-600 bg-yellow-50 p-2 rounded border border-yellow-200 text-justify leading-tight">
-                    *Untuk menjaga sinkronisasi stok, <b>edit isi barang tidak diizinkan</b>. Jika barang salah, klik <b>Hapus</b> (Void) transaksi ini.
+                    *Untuk menjaga sinkronisasi stok, <b>edit isi barang tidak diizinkan</b>. Jika barang salah, klik <b>Void</b> transaksi ini.
                 </div>
                 <form onSubmit={saveEdit} className="space-y-4">
                     <div className="grid grid-cols-2 gap-2">
@@ -344,11 +439,10 @@ export default function Transactions() {
         </div>
       )}
 
-      {/* --- MODAL CETAK ULANG STRUK --- */}
+      {/* MODAL STRUK */}
       {showReceipt && receiptData && (
         <div className="fixed inset-0 z-[100] bg-black/90 flex flex-col items-center justify-center p-4 overflow-y-auto">
             <h2 className="text-white font-bold text-xl mb-4 mt-20">Struk Salinan (Copy)</h2>
-            
             <div className="bg-white p-5 max-w-[300px] w-full mx-auto shadow-2xl shrink-0" ref={receiptRef} style={{fontFamily: 'monospace', color: '#000000', backgroundColor: '#ffffff'}}>
                 <div className="text-center mb-4">
                     <h1 className="font-bold text-xl tracking-widest">POPCIONARDES</h1>
@@ -390,7 +484,6 @@ export default function Transactions() {
                 <div className="flex justify-between font-bold text-sm"><span>TOTAL BAYAR:</span><span>Rp {receiptData.total.toLocaleString()}</span></div>
                 <div className="flex justify-between text-[10px] mt-1"><span>Pembayaran:</span><span className="uppercase font-bold">{receiptData.paymentMethod}</span></div>
                 {receiptData.note && <div className="flex justify-between text-[10px] mt-1"><span>Catatan:</span><span className="font-bold text-right">{receiptData.note}</span></div>}
-                
                 <div className="border-t border-dashed border-gray-400 my-4"></div>
                 <div className="text-center text-[10px]">
                     <div className="font-bold">*** COPY RECEIPT ***</div>
@@ -399,14 +492,13 @@ export default function Transactions() {
             </div>
 
             <div className="flex gap-2 mt-6 mb-10 w-full max-w-[300px] shrink-0">
-                <button onClick={downloadPDF} className="flex-1 bg-white text-gray-800 py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-gray-100 text-sm shadow-lg">
+                <button onClick={downloadPDF} className="flex-1 bg-white text-gray-800 py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-gray-100 text-sm">
                     <Download size={18}/> Download
                 </button>
                 <button onClick={shareReceiptLink} disabled={isSharing} className="flex-[2] bg-blue-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-blue-700 shadow-lg shadow-blue-500/30 text-sm disabled:bg-gray-500 transition-colors">
                     {isSharing ? 'Memproses...' : <><Share2 size={18}/> Bagikan Ulang</>}
                 </button>
             </div>
-            
             <button onClick={() => setShowReceipt(false)} className="mb-10 text-gray-400 underline text-sm hover:text-white shrink-0">
                 Tutup Struk
             </button>

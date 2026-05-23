@@ -2,86 +2,157 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { useRouter } from 'next/navigation'
-import { LogOut, UserCircle, Moon, Sun } from 'lucide-react'
+import { User, LogOut, Moon, Sun, MonitorSmartphone, ShieldCheck, Store, Database, Trash2, ChevronRight } from 'lucide-react'
 import { useTheme } from 'next-themes'
+import toast from 'react-hot-toast'
 
 export default function Profile() {
   const [user, setUser] = useState<any>(null)
-  
-  // Ambil resolvedTheme untuk tahu tema yang AKTIF saat ini (meskipun settingannya 'system')
-  const { theme, setTheme, resolvedTheme } = useTheme() 
+  const [profile, setProfile] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
   const [mounted, setMounted] = useState(false)
   
-  const router = useRouter()
+  const { theme, setTheme } = useTheme()
   const supabase = createClient()
+  const router = useRouter()
 
   useEffect(() => {
     setMounted(true)
-    const getUser = async () => {
-      const { data } = await supabase.auth.getUser()
-      if (data.user) setUser(data.user)
-      else router.push('/login')
-    }
-    getUser()
+    fetchUser()
   }, [])
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
-    router.push('/login')
-    router.refresh()
+  const fetchUser = async () => {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      setUser(user)
+      const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single()
+      setProfile(data)
+    } else {
+      router.push('/login')
+    }
+    setLoading(false)
   }
 
-  // Toggle function: Cek tema yang aktif sekarang, lalu balik kondisinya
-  const toggleTheme = () => {
-    if (resolvedTheme === 'dark') {
-      setTheme('light')
-    } else {
-      setTheme('dark')
+  const handleLogout = async () => {
+    const loadingToast = toast.loading('Sedang keluar...')
+    await supabase.auth.signOut()
+    toast.dismiss(loadingToast)
+    router.push('/login')
+  }
+
+  const handleClearCache = () => {
+    if (confirm('Bersihkan data cache lokal? (Hanya menghapus data sementara, tidak menghapus data di server utama)')) {
+        // Hapus database lokal IndexedDB
+        const req = indexedDB.deleteDatabase('pos-offline-db')
+        req.onsuccess = () => toast.success("Cache berhasil dibersihkan!")
+        req.onerror = () => toast.error("Gagal membersihkan cache")
     }
   }
 
-  if (!mounted) return null
+  if (loading) return <div className="p-4 text-center dark:text-white mt-10">Memuat profil...</div>
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-slate-900 p-4 transition-colors duration-300">
-      <h1 className="text-xl font-bold mb-6 text-gray-800 dark:text-white">Profil Saya</h1>
-
-      <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 flex flex-col items-center mb-6 transition-colors">
-        <div className="w-24 h-24 bg-pop-green-light dark:bg-slate-700 rounded-full flex items-center justify-center text-pop-green dark:text-pop-green mb-4 shadow-sm border-4 border-white dark:border-slate-800">
-            <UserCircle size={64} />
-        </div>
-        <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">
-          {user?.user_metadata?.full_name || 'Kasir'}
-        </h2>
-        <p className="text-gray-500 dark:text-gray-400 text-sm">{user?.email}</p>
-      </div>
-
-      <div className="space-y-3">
-        {/* Tombol Toggle Tema */}
-        <button 
-          onClick={toggleTheme}
-          className="w-full bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-gray-200 p-4 rounded-xl flex items-center justify-between font-semibold hover:bg-gray-50 dark:hover:bg-slate-700 transition"
-        >
-          <div className="flex items-center gap-3">
-            {/* Icon berubah sesuai tema yang aktif */}
-            {resolvedTheme === 'dark' ? <Moon size={20} className="text-purple-400"/> : <Sun size={20} className="text-orange-500"/>}
-            <span>Mode Tampilan</span>
-          </div>
-          <span className="text-xs bg-gray-100 dark:bg-slate-900 px-2 py-1 rounded text-gray-500 dark:text-gray-400">
-            {resolvedTheme === 'dark' ? 'Gelap (Night)' : 'Terang (Day)'}
-          </span>
-        </button>
-
-        <button 
-          onClick={handleLogout}
-          className="w-full bg-white dark:bg-slate-800 border border-red-100 dark:border-red-900/30 text-red-600 dark:text-red-400 p-4 rounded-xl flex items-center gap-3 font-semibold hover:bg-red-50 dark:hover:bg-red-900/10 transition"
-        >
-          <LogOut size={20} />
-          Keluar Aplikasi
-        </button>
-      </div>
+    <div className="min-h-screen bg-gray-50 dark:bg-slate-900 pb-24 transition-colors duration-300 select-none">
       
-      <p className="text-center text-gray-400 dark:text-gray-600 text-xs mt-8">Versi Aplikasi 1.0.1</p>
+      {/* HEADER PROFILE */}
+      <div className="bg-white dark:bg-slate-800 pt-12 pb-6 px-4 shadow-sm border-b dark:border-slate-700 flex flex-col items-center transition-colors">
+        <div className="w-24 h-24 bg-gradient-to-tr from-pop-green to-emerald-500 rounded-full flex items-center justify-center shadow-lg shadow-green-200 dark:shadow-none mb-3">
+          <User size={40} className="text-white" />
+        </div>
+        <h1 className="text-2xl font-bold text-gray-800 dark:text-white transition-colors">
+            {profile?.full_name || user?.email?.split('@')[0] || 'Pengguna'}
+        </h1>
+        <p className="text-gray-500 dark:text-gray-400 text-sm mb-3 transition-colors">{user?.email}</p>
+        
+        <div className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 ${profile?.role === 'admin' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 border border-purple-200 dark:border-purple-800' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border border-blue-200 dark:border-blue-800'}`}>
+            <ShieldCheck size={14}/>
+            {profile?.role === 'admin' ? 'Administrator' : 'Kasir / Staf'}
+        </div>
+      </div>
+
+      <div className="p-4 space-y-6 mt-2">
+        
+        {/* SECTION: TAMPILAN */}
+        <div>
+            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 ml-2">Tampilan Aplikasi</h3>
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden transition-colors">
+                
+                {/* Opsi Light */}
+                <button onClick={() => {setTheme('light'); toast.success("Mode Terang aktif")}} className="w-full flex items-center justify-between p-4 border-b border-gray-50 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 rounded-lg"><Sun size={18}/></div>
+                        <span className="font-medium text-gray-700 dark:text-gray-200">Mode Terang</span>
+                    </div>
+                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${theme === 'light' ? 'border-pop-green' : 'border-gray-300 dark:border-slate-600'}`}>
+                        {theme === 'light' && <div className="w-2.5 h-2.5 bg-pop-green rounded-full"></div>}
+                    </div>
+                </button>
+
+                {/* Opsi Dark */}
+                <button onClick={() => {setTheme('dark'); toast.success("Mode Gelap aktif")}} className="w-full flex items-center justify-between p-4 border-b border-gray-50 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-400 rounded-lg"><Moon size={18}/></div>
+                        <span className="font-medium text-gray-700 dark:text-gray-200">Mode Gelap</span>
+                    </div>
+                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${theme === 'dark' ? 'border-pop-green' : 'border-gray-300 dark:border-slate-600'}`}>
+                        {theme === 'dark' && <div className="w-2.5 h-2.5 bg-pop-green rounded-full"></div>}
+                    </div>
+                </button>
+
+                {/* Opsi System */}
+                <button onClick={() => {setTheme('system'); toast.success("Tema mengikuti sistem HP")}} className="w-full flex items-center justify-between p-4 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-blue-100 dark:bg-blue-900/30 text-blue-600 rounded-lg"><MonitorSmartphone size={18}/></div>
+                        <span className="font-medium text-gray-700 dark:text-gray-200">Ikuti Sistem HP</span>
+                    </div>
+                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${theme === 'system' ? 'border-pop-green' : 'border-gray-300 dark:border-slate-600'}`}>
+                        {theme === 'system' && <div className="w-2.5 h-2.5 bg-pop-green rounded-full"></div>}
+                    </div>
+                </button>
+            </div>
+        </div>
+
+        {/* SECTION: PENGATURAN TOKO (Admin Only) */}
+        {profile?.role === 'admin' && (
+            <div>
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 ml-2">Pengaturan Admin</h3>
+                <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden transition-colors">
+                    <button onClick={() => router.push('/profile/store')} className="w-full flex items-center justify-between p-4 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-orange-100 dark:bg-orange-900/30 text-orange-600 rounded-lg"><Store size={18}/></div>
+                            <span className="font-medium text-gray-700 dark:text-gray-200">Informasi Toko & Struk</span>
+                        </div>
+                        <ChevronRight size={18} className="text-gray-400"/>
+                    </button>
+                </div>
+            </div>
+        )}
+
+        {/* SECTION: SISTEM */}
+        <div>
+            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 ml-2">Sistem</h3>
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden transition-colors">
+                <button onClick={handleClearCache} className="w-full flex items-center justify-between p-4 border-b border-gray-50 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-lg"><Database size={18}/></div>
+                        <div className="text-left">
+                            <div className="font-medium text-gray-700 dark:text-gray-200">Bersihkan Cache</div>
+                            <div className="text-[10px] text-gray-400">Kosongkan memori HP untuk aplikasi ini</div>
+                        </div>
+                    </div>
+                    <Trash2 size={18} className="text-gray-400"/>
+                </button>
+                <button onClick={handleLogout} className="w-full flex items-center gap-3 p-4 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors group">
+                    <div className="p-2 bg-red-100 dark:bg-red-900/30 text-red-600 rounded-lg group-hover:bg-red-200 dark:group-hover:bg-red-900/50 transition-colors"><LogOut size={18}/></div>
+                    <span className="font-bold text-red-600">Keluar Akun (Logout)</span>
+                </button>
+            </div>
+        </div>
+
+        <div className="text-center text-xs text-gray-400 pb-8">
+            Popcionardes POS v2.1.0<br/>Sistem Kasir Offline-First
+        </div>
+      </div>
     </div>
   )
 }

@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
   /* Definisikan Warna Kustom Logo di sini (v4 style) */

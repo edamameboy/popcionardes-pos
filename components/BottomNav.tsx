@@ -19,7 +19,7 @@ export default function BottomNav() {
   ]
 
   return (
-    <div className="fixed bottom-0 left-0 z-50 w-full h-16 bg-white dark:bg-slate-800 border-t border-gray-200 dark:border-slate-700 shadow-lg transition-colors">
+    <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-5xl bg-white dark:bg-slate-800 border-t dark:border-slate-700 flex justify-around p-3 pb-safe z-50 transition-colors duration-300">
       {/* GRID SELALU 5 KOLOM */}
       <div className="grid h-full mx-auto font-medium grid-cols-5">
         {menus.map((menu) => {
