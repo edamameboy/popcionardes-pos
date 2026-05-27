@@ -12,7 +12,8 @@ export default function Inventory() {
   const [search, setSearch] = useState('')
   const [isUploading, setIsUploading] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
-  const [isGudang, setIsGudang] = useState(false) // State Gudang
+  const [isGudang, setIsGudang] = useState(false)
+  const [isKasir, setIsKasir] = useState(false) // <--- State Kasir
   const [userName, setUserName] = useState('Staff')
 
   const [editingProduct, setEditingProduct] = useState<any | null>(null)
@@ -40,10 +41,8 @@ export default function Inventory() {
     // --- VALIDASI ROLE ---
     if (profile?.role === 'admin') setIsAdmin(true)
     else if (profile?.role === 'gudang') setIsGudang(true)
-    else {
-        toast.error("Akses Ditolak: Anda tidak dapat mengakses Gudang.")
-        return router.push('/pos')
-    }
+    else if (profile?.role === 'kasir') setIsKasir(true)
+    else return router.push('/login')
     // ---------------------
     
     fetchProducts()
@@ -56,12 +55,12 @@ export default function Inventory() {
   }
 
   const deleteProduct = async (id: number) => {
-    if (!isAdmin) return alert("Akses Ditolak: Hanya Admin.")
+    if (!isAdmin) return toast.error("Akses Ditolak: Hanya Admin.")
     if (confirm('Hapus produk ini?')) {
       const { error } = await supabase.from('products').delete().eq('id', id)
       if (error) {
-        if (error.message.includes('foreign key')) alert("GAGAL: Produk sudah ada di riwayat transaksi.")
-        else alert('Gagal: ' + error.message)
+        if (error.message.includes('foreign key')) toast.error("GAGAL: Produk sudah ada di riwayat transaksi.")
+        else toast.error('Gagal: ' + error.message)
       } else fetchProducts()
     }
   }
@@ -70,8 +69,8 @@ export default function Inventory() {
     e.preventDefault()
     if (!editingProduct) return
     const { error } = await supabase.from('products').update({ name: editingProduct.name, price: editingProduct.price, barcode: editingProduct.barcode, description: editingProduct.description }).eq('id', editingProduct.id)
-    if (error) alert("Gagal update: " + error.message)
-    else { alert("Sukses!"); setEditingProduct(null); fetchProducts() }
+    if (error) toast.error("Gagal update: " + error.message)
+    else { toast.success("Data berhasil diperbarui!"); setEditingProduct(null); fetchProducts() }
   }
 
   const handleOpenOpname = (product: any) => {
@@ -84,17 +83,16 @@ export default function Inventory() {
       setIsSavingOpname(true)
       const difference = opnameData.new_stock - opnameData.old_stock
       const { error: updateError } = await supabase.from('products').update({ stock: opnameData.new_stock }).eq('id', opnameData.id)
-      if (updateError) { alert("Gagal merubah stok: " + updateError.message); setIsSavingOpname(false); return }
+      if (updateError) { toast.error("Gagal merubah stok: " + updateError.message); setIsSavingOpname(false); return }
 
       await supabase.from('stock_adjustments').insert({ product_id: opnameData.id, product_name: opnameData.name, old_stock: opnameData.old_stock, new_stock: opnameData.new_stock, difference: difference, reason: opnameData.reason || 'Penyesuaian Manual', user_name: userName })
-      setOpnameModal(false); setIsSavingOpname(false); fetchProducts(); alert("Stok berhasil di-opname!")
+      setOpnameModal(false); setIsSavingOpname(false); fetchProducts(); toast.success("Stok berhasil di-opname!")
   }
 
-  // (Fungsi handleExportCSV, handleFileUpload, handleExportOpnameCSV, handleOpnameUpload tetap sama persis seperti sebelumnya)
-  const handleExportCSV = () => { /* ... (kode sama) ... */ }
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => { /* ... (kode sama) ... */ }
+  const handleExportCSV = () => { /* ... kode export ... */ }
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => { /* ... kode upload ... */ }
   const handleExportOpnameCSV = () => {
-    if (products.length === 0) return alert("Belum ada data untuk diexport.")
+    if (products.length === 0) return toast.error("Belum ada data untuk diexport.")
     const csvData = products.map(p => ({ 'ID': p.id, 'Nama Produk': p.name, 'Stok Sistem (Jangan Diubah)': p.stock, 'Stok Fisik (Isi Disini)': '', 'Alasan (Opsional)': '' }))
     const csv = Papa.unparse(csvData)
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
@@ -116,11 +114,11 @@ export default function Inventory() {
                 productUpdates.push({ ...existing, stock: fisik })
             }
         })
-        if (productUpdates.length === 0) { alert('Tidak ada selisih stok / format kosong. Opname selesai tanpa perubahan.'); setIsUploading(false); if (opnameInputRef.current) opnameInputRef.current.value = ''; return }
-        const { error: prodErr } = await supabase.from('products').upsert(productUpdates); if (prodErr) { alert('Gagal update stok: ' + prodErr.message); setIsUploading(false); return }
+        if (productUpdates.length === 0) { toast.error('Tidak ada selisih stok / format kosong. Opname selesai tanpa perubahan.'); setIsUploading(false); if (opnameInputRef.current) opnameInputRef.current.value = ''; return }
+        const { error: prodErr } = await supabase.from('products').upsert(productUpdates); if (prodErr) { toast.error('Gagal update stok: ' + prodErr.message); setIsUploading(false); return }
         await supabase.from('stock_adjustments').insert(adjustments)
-        alert(`Berhasil! ${productUpdates.length} produk mengalami penyesuaian stok dan telah tercatat di Riwayat Opname.`); fetchProducts(); setIsUploading(false); if (opnameInputRef.current) opnameInputRef.current.value = '' 
-      }, error: (error) => { alert('Error membaca file: ' + error.message); setIsUploading(false) }
+        toast.success(`Berhasil! ${productUpdates.length} produk mengalami penyesuaian stok.`); fetchProducts(); setIsUploading(false); if (opnameInputRef.current) opnameInputRef.current.value = '' 
+      }, error: (error) => { toast.error('Error membaca file: ' + error.message); setIsUploading(false) }
     })
   }
 
@@ -157,7 +155,6 @@ export default function Inventory() {
             </div>
 
             <div className="flex flex-col lg:flex-row gap-3 w-full xl:w-auto">
-                {/* GROUP DATA MASTER (Hanya Admin) */}
                 {isAdmin && (
                     <div className="flex overflow-x-auto no-scrollbar rounded-xl shadow-sm border border-blue-200 dark:border-blue-900/30 w-full lg:w-auto">
                         <div className="bg-blue-50 dark:bg-blue-900/20 px-3 py-2 text-xs font-bold text-blue-700 dark:text-blue-400 flex items-center whitespace-nowrap shrink-0">DATA MASTER</div>
@@ -166,8 +163,6 @@ export default function Inventory() {
                         <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="shrink-0 bg-white dark:bg-slate-800 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 px-3 py-2 text-sm border-l border-blue-100 dark:border-slate-700 flex items-center gap-1 font-medium transition-colors">{isUploading ? '⏳' : <><Upload size={16}/> Import</>}</button>
                     </div>
                 )}
-
-                {/* GROUP OPNAME (Admin & Gudang) */}
                 {(isAdmin || isGudang) && (
                     <div className="flex overflow-x-auto no-scrollbar rounded-xl shadow-sm border border-purple-200 dark:border-purple-900/30 w-full lg:w-auto">
                         <div className="bg-purple-50 dark:bg-purple-900/20 px-3 py-2 text-xs font-bold text-purple-700 dark:text-purple-400 flex items-center whitespace-nowrap shrink-0">OPNAME</div>
@@ -180,6 +175,7 @@ export default function Inventory() {
         </div>
       </div>
 
+      {/* TAMPILAN MOBILE */}
       <div className="grid grid-cols-1 gap-3 md:hidden">
         {loading ? <div className="text-center py-10 text-gray-500">Memuat...</div> : 
          processedData.length === 0 ? <div className="text-center py-10 text-gray-400 bg-white dark:bg-slate-800 rounded-xl border border-dashed dark:border-slate-700">Produk Kosong</div> :
@@ -192,26 +188,26 @@ export default function Inventory() {
                     </div>
                     <div className={`px-2 py-1 rounded text-xs font-bold ${product.stock <= 5 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>Stok: {product.stock}</div>
                 </div>
-                
                 <div className="flex justify-between items-center border-t dark:border-slate-700 pt-3 mt-2">
                     <div className="font-bold text-gray-700 dark:text-gray-200">Rp {product.price.toLocaleString()}</div>
-                    {(isAdmin || isGudang) && (
-                        <div className="flex gap-2">
+                    <div className="flex gap-2">
+                        {(isAdmin || isGudang) && (
                             <button onClick={() => handleOpenOpname(product)} className="p-2 bg-purple-50 text-purple-600 rounded-lg hover:bg-purple-100 shadow-sm"><Scale size={18}/></button>
-                            {isAdmin && (
-                                <>
-                                <button onClick={() => setEditingProduct(product)} className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 shadow-sm"><Edit size={18}/></button>
-                                <button onClick={() => deleteProduct(product.id)} className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 shadow-sm"><Trash2 size={18}/></button>
-                                </>
-                            )}
-                        </div>
-                    )}
+                        )}
+                        {(isAdmin || isKasir) && (
+                            <button onClick={() => setEditingProduct(product)} className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 shadow-sm"><Edit size={18}/></button>
+                        )}
+                        {isAdmin && (
+                            <button onClick={() => deleteProduct(product.id)} className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 shadow-sm"><Trash2 size={18}/></button>
+                        )}
+                    </div>
                 </div>
             </div>
          ))
         }
       </div>
 
+      {/* TAMPILAN DESKTOP/TABLET */}
       <div className="hidden md:block bg-white dark:bg-slate-800 rounded-xl shadow-sm border dark:border-slate-700 overflow-hidden">
         <table className="w-full text-left">
           <thead className="bg-gray-100 dark:bg-slate-700/50 text-gray-600 dark:text-gray-300 border-b dark:border-slate-700">
@@ -219,7 +215,7 @@ export default function Inventory() {
               <th className="p-4 cursor-pointer hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors group" onClick={() => requestSort('name')}><div className="flex items-center gap-2">Produk {getSortIcon('name')}</div></th>
               <th className="p-4 cursor-pointer hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors group" onClick={() => requestSort('price')}><div className="flex items-center gap-2">Harga {getSortIcon('price')}</div></th>
               <th className="p-4 text-center cursor-pointer hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors group" onClick={() => requestSort('stock')}><div className="flex items-center justify-center gap-2">Stok {getSortIcon('stock')}</div></th>
-              {(isAdmin || isGudang) && <th className="p-4 text-right">Aksi</th>}
+              <th className="p-4 text-right">Aksi</th>
             </tr>
           </thead>
           <tbody>
@@ -230,27 +226,26 @@ export default function Inventory() {
                   <td className="p-4"><div className="font-bold dark:text-white">{product.name}</div><div className="text-xs text-gray-500">{product.barcode || '-'}</div></td>
                   <td className="p-4 dark:text-gray-300 font-medium">Rp {product.price.toLocaleString()}</td>
                   <td className={`p-4 text-center font-bold ${product.stock <= 5 ? 'text-red-500' : 'text-green-600'}`}>{product.stock}</td>
-                  {(isAdmin || isGudang) && (
-                    <td className="p-4 text-right">
-                        <div className="flex justify-end gap-2">
-                        <button onClick={() => handleOpenOpname(product)} className="p-2 text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg dark:bg-purple-900/20 dark:text-purple-400" title="Opname Stok"><Scale size={18} /></button>
-                        {isAdmin && (
-                            <>
-                            <button onClick={() => setEditingProduct(product)} className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg dark:bg-blue-900/20 dark:text-blue-400" title="Edit Data"><Edit size={18} /></button>
-                            <button onClick={() => deleteProduct(product.id)} className="p-2 text-red-500 bg-red-50 hover:bg-red-100 rounded-lg dark:bg-red-900/20 dark:text-red-400" title="Hapus Produk"><Trash2 size={18} /></button>
-                            </>
+                  <td className="p-4 text-right">
+                      <div className="flex justify-end gap-2">
+                        {(isAdmin || isGudang) && (
+                            <button onClick={() => handleOpenOpname(product)} className="p-2 text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg dark:bg-purple-900/20 dark:text-purple-400" title="Opname Stok"><Scale size={18} /></button>
                         )}
-                        </div>
-                    </td>
-                  )}
+                        {(isAdmin || isKasir) && (
+                            <button onClick={() => setEditingProduct(product)} className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg dark:bg-blue-900/20 dark:text-blue-400" title="Edit Data"><Edit size={18} /></button>
+                        )}
+                        {isAdmin && (
+                            <button onClick={() => deleteProduct(product.id)} className="p-2 text-red-500 bg-red-50 hover:bg-red-100 rounded-lg dark:bg-red-900/20 dark:text-red-400" title="Hapus Produk"><Trash2 size={18} /></button>
+                        )}
+                      </div>
+                  </td>
                 </tr>
               ))}
           </tbody>
         </table>
       </div>
 
-      {/* (Modal Edit Data Master dan Stock Opname tetap sama seperti sebelumnya) */}
-      {/* --- MODAL EDIT DATA MASTER --- */}
+      {/* --- MODAL EDIT DATA MASTER (KHUSUS KASIR DISABLED NAMA & BARCODE) --- */}
       {editingProduct && (
         <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4">
             <div className="bg-white dark:bg-slate-800 w-full max-w-md rounded-2xl shadow-2xl p-6 animate-in fade-in zoom-in duration-200">
@@ -258,13 +253,15 @@ export default function Inventory() {
                     <h3 className="text-lg font-bold dark:text-white">Edit Master Produk</h3>
                     <button onClick={() => setEditingProduct(null)}><X size={24} className="text-gray-400 hover:text-red-500"/></button>
                 </div>
-                <div className="mb-4 text-[10px] text-blue-600 bg-blue-50 p-2 rounded border border-blue-200 leading-tight">
-                    *Edit di sini <b>TIDAK merubah jumlah stok</b>.
-                </div>
+                {isKasir && !isAdmin && (
+                    <div className="mb-4 text-[10px] text-orange-600 bg-orange-50 p-2 rounded border border-orange-200 leading-tight">
+                        *Sebagai Kasir, Anda hanya diizinkan mengubah <b>Harga Produk</b>.
+                    </div>
+                )}
                 <form onSubmit={handleSaveEdit} className="space-y-4">
                     <div>
                         <label className="text-xs font-bold text-gray-500 dark:text-gray-400">Nama Produk</label>
-                        <input className="w-full border p-3 rounded-xl bg-gray-50 dark:bg-slate-700 dark:border-slate-600 dark:text-white font-bold outline-none focus:ring-2 focus:ring-pop-green" value={editingProduct.name} onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} required />
+                        <input className={`w-full border p-3 rounded-xl dark:border-slate-600 font-bold outline-none focus:ring-2 focus:ring-pop-green ${!isAdmin ? 'bg-gray-100 text-gray-500 dark:bg-slate-700/50 cursor-not-allowed' : 'bg-gray-50 dark:bg-slate-700 dark:text-white'}`} value={editingProduct.name} onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} required disabled={!isAdmin} />
                     </div>
                     <div>
                         <label className="text-xs font-bold text-gray-500 dark:text-gray-400">Harga (Rp)</label>
@@ -273,11 +270,11 @@ export default function Inventory() {
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="text-xs font-bold text-gray-500 dark:text-gray-400">Barcode</label>
-                            <input className="w-full border p-3 rounded-xl bg-gray-50 dark:bg-slate-700 dark:border-slate-600 dark:text-white text-sm outline-none focus:ring-2 focus:ring-pop-green" value={editingProduct.barcode || ''} onChange={e => setEditingProduct({...editingProduct, barcode: e.target.value})} />
+                            <input className={`w-full border p-3 rounded-xl text-sm dark:border-slate-600 outline-none focus:ring-2 focus:ring-pop-green ${!isAdmin ? 'bg-gray-100 text-gray-500 dark:bg-slate-700/50 cursor-not-allowed' : 'bg-gray-50 dark:bg-slate-700 dark:text-white'}`} value={editingProduct.barcode || ''} onChange={e => setEditingProduct({...editingProduct, barcode: e.target.value})} disabled={!isAdmin} />
                         </div>
                         <div>
                             <label className="text-xs font-bold text-gray-500 dark:text-gray-400">Deskripsi / SKU</label>
-                            <input className="w-full border p-3 rounded-xl bg-gray-50 dark:bg-slate-700 dark:border-slate-600 dark:text-white text-sm outline-none focus:ring-2 focus:ring-pop-green" value={editingProduct.description || ''} onChange={e => setEditingProduct({...editingProduct, description: e.target.value})} />
+                            <input className={`w-full border p-3 rounded-xl text-sm dark:border-slate-600 outline-none focus:ring-2 focus:ring-pop-green ${!isAdmin ? 'bg-gray-100 text-gray-500 dark:bg-slate-700/50 cursor-not-allowed' : 'bg-gray-50 dark:bg-slate-700 dark:text-white'}`} value={editingProduct.description || ''} onChange={e => setEditingProduct({...editingProduct, description: e.target.value})} disabled={!isAdmin} />
                         </div>
                     </div>
                     <button type="submit" className="w-full py-3 bg-pop-green hover:bg-pop-green-dark text-white rounded-xl font-bold flex justify-center gap-2 mt-4 transition-colors"><Save size={18}/> Simpan Perubahan</button>
@@ -286,9 +283,10 @@ export default function Inventory() {
         </div>
       )}
 
-      {/* --- MODAL STOCK OPNAME SATUAN --- */}
+      {/* --- MODAL STOCK OPNAME SATUAN (GUDANG / ADMIN) --- */}
       {opnameModal && opnameData && (
         <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4">
+           {/* ... kode modal opname sama ... */}
             <div className="bg-white dark:bg-slate-800 w-full max-w-sm rounded-2xl shadow-2xl p-6 animate-in fade-in zoom-in duration-200">
                 <div className="flex justify-between items-center mb-6">
                     <h3 className="text-lg font-bold dark:text-white flex items-center gap-2"><Scale className="text-purple-500"/> Stock Opname</h3>

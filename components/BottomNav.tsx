@@ -15,19 +15,18 @@ export default function BottomNav() {
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
         const { data } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-        setRole(data?.role || 'kasir') // Default aman
+        setRole(data?.role || 'kasir') 
       }
     }
     fetchRole()
   }, [pathname]) 
 
-  // Sembunyikan nav di halaman login/register
   if (pathname === '/login' || pathname === '/register') return null
 
   // DAFTAR MENU DINAMIS BERDASARKAN ROLE
   const menus = [
-    // Dashboard HANYA untuk Admin
-    ...(role === 'admin' ? [{ name: 'Home', href: '/', icon: LayoutDashboard }] : []),
+    // Dashboard untuk Admin dan Kasir
+    ...(role === 'admin' || role === 'kasir' ? [{ name: 'Home', href: '/', icon: LayoutDashboard }] : []),
     
     // Kasir & Transaksi untuk Admin dan Kasir
     ...(role === 'admin' || role === 'kasir' ? [
@@ -35,8 +34,8 @@ export default function BottomNav() {
         { name: 'Trans.', href: '/transactions', icon: FileText }
     ] : []),
 
-    // Inventory untuk Admin dan Gudang
-    ...(role === 'admin' || role === 'gudang' ? [
+    // Inventory untuk Admin, Gudang, DAN Kasir
+    ...(role === 'admin' || role === 'gudang' || role === 'kasir' ? [
         { name: 'Stok', href: '/inventory', icon: Package }
     ] : []),
 

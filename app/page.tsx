@@ -30,7 +30,6 @@ export default function Dashboard() {
 
         // --- VALIDASI ROLE ---
         const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-        if (profile?.role === 'kasir') { router.push('/pos'); return }
         if (profile?.role === 'gudang') { router.push('/inventory'); return }
         // ---------------------
 
