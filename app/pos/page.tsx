@@ -55,6 +55,15 @@ export default function POS() {
 
   useEffect(() => {
     const fetchEventHistory = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+          const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+          if (profile?.role === 'gudang') {
+              toast.error('Akses Ditolak: Fitur khusus Kasir/Admin.')
+              router.push('/inventory')
+              return
+          }
+      }
       const { data } = await supabase.from('transactions').select('location_event').not('location_event', 'is', null).order('created_at', { ascending: false }).limit(100)
       if (data) {
         const uniqueEvents = Array.from(new Set(data.map(item => item.location_event))).filter(evt => evt && evt.trim() !== '')

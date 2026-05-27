@@ -6,6 +6,7 @@ import { Calendar, CreditCard, ChevronDown, ChevronUp, Trash2, X, Tag, Gift, Use
 import { toPng } from 'html-to-image' 
 import jsPDF from 'jspdf'
 import { useNetwork } from '@/hooks/useNetwork'
+import toast from 'react-hot-toast'
 
 export default function Transactions() {
   const [transactions, setTransactions] = useState<any[]>([])
@@ -45,6 +46,10 @@ export default function Transactions() {
     if (!user) return router.push('/login')
 
     const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+    if (profile?.role === 'gudang') {
+        toast.error('Akses Ditolak: Anda tidak dapat melihat riwayat transaksi.')
+        return router.push('/inventory')
+    }
     if (profile?.role === 'admin') setIsAdmin(true)
 
     await Promise.all([fetchTransactions(), fetchProfiles()])
