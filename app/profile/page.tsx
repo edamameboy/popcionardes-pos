@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { useRouter } from 'next/navigation'
-import { User, LogOut, Moon, Sun, MonitorSmartphone, ShieldCheck, Store, Database, Trash2, ChevronRight } from 'lucide-react'
+import { User, LogOut, Moon, Sun, MonitorSmartphone, ShieldCheck, Store, Database, Trash2, ChevronRight, Package, ShoppingCart, Users } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import toast from 'react-hot-toast'
 
@@ -42,14 +42,28 @@ export default function Profile() {
 
   const handleClearCache = () => {
     if (confirm('Bersihkan data cache lokal? (Hanya menghapus data sementara, tidak menghapus data di server utama)')) {
-        // Hapus database lokal IndexedDB
         const req = indexedDB.deleteDatabase('pos-offline-db')
         req.onsuccess = () => toast.success("Cache berhasil dibersihkan!")
         req.onerror = () => toast.error("Gagal membersihkan cache")
     }
   }
 
+  // LOGIKA TAMPILAN ROLE (WARNA & TEKS DINAMIS)
+  const getRoleDisplay = () => {
+      const role = profile?.role
+      if (role === 'admin') {
+          return { label: 'Administrator', color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 border-purple-200 dark:border-purple-800', icon: ShieldCheck }
+      } else if (role === 'gudang') {
+          return { label: 'Staf Gudang', color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 border-orange-200 dark:border-orange-800', icon: Package }
+      } else {
+          return { label: 'Kasir', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border-blue-200 dark:border-blue-800', icon: ShoppingCart }
+      }
+  }
+
   if (loading) return <div className="p-4 text-center dark:text-white mt-10">Memuat profil...</div>
+
+  const RoleData = getRoleDisplay()
+  const RoleIcon = RoleData.icon
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-900 pb-24 transition-colors duration-300 select-none">
@@ -64,9 +78,10 @@ export default function Profile() {
         </h1>
         <p className="text-gray-500 dark:text-gray-400 text-sm mb-3 transition-colors">{user?.email}</p>
         
-        <div className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 ${profile?.role === 'admin' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 border border-purple-200 dark:border-purple-800' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border border-blue-200 dark:border-blue-800'}`}>
-            <ShieldCheck size={14}/>
-            {profile?.role === 'admin' ? 'Administrator' : 'Kasir / Staf'}
+        {/* BADGE ROLE DINAMIS */}
+        <div className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 border ${RoleData.color}`}>
+            <RoleIcon size={14}/>
+            {RoleData.label}
         </div>
       </div>
 
@@ -76,8 +91,6 @@ export default function Profile() {
         <div>
             <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 ml-2">Tampilan Aplikasi</h3>
             <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden transition-colors">
-                
-                {/* Opsi Light */}
                 <button onClick={() => {setTheme('light'); toast.success("Mode Terang aktif")}} className="w-full flex items-center justify-between p-4 border-b border-gray-50 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
                     <div className="flex items-center gap-3">
                         <div className="p-2 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 rounded-lg"><Sun size={18}/></div>
@@ -88,18 +101,17 @@ export default function Profile() {
                     </div>
                 </button>
 
-                {/* Opsi Dark */}
                 <button onClick={() => {setTheme('dark'); toast.success("Mode Gelap aktif")}} className="w-full flex items-center justify-between p-4 border-b border-gray-50 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
                     <div className="flex items-center gap-3">
                         <div className="p-2 bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-400 rounded-lg"><Moon size={18}/></div>
                         <span className="font-medium text-gray-700 dark:text-gray-200">Mode Gelap</span>
                     </div>
+                    
                     <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${theme === 'dark' ? 'border-pop-green' : 'border-gray-300 dark:border-slate-600'}`}>
                         {theme === 'dark' && <div className="w-2.5 h-2.5 bg-pop-green rounded-full"></div>}
                     </div>
                 </button>
 
-                {/* Opsi System */}
                 <button onClick={() => {setTheme('system'); toast.success("Tema mengikuti sistem HP")}} className="w-full flex items-center justify-between p-4 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
                     <div className="flex items-center gap-3">
                         <div className="p-2 bg-blue-100 dark:bg-blue-900/30 text-blue-600 rounded-lg"><MonitorSmartphone size={18}/></div>
@@ -112,11 +124,22 @@ export default function Profile() {
             </div>
         </div>
 
-        {/* SECTION: PENGATURAN TOKO (Admin Only) */}
+        {/* SECTION: PENGATURAN TOKO (HANYA ADMIN) */}
         {profile?.role === 'admin' && (
             <div>
                 <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 ml-2">Pengaturan Admin</h3>
                 <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden transition-colors">
+                    
+                    {/* Tombol Pengguna */}
+                    <button onClick={() => router.push('/profile/users')} className="w-full flex items-center justify-between p-4 border-b border-gray-50 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-blue-100 dark:bg-blue-900/30 text-blue-600 rounded-lg"><Users size={18}/></div>
+                            <span className="font-medium text-gray-700 dark:text-gray-200">Manajemen Pengguna</span>
+                        </div>
+                        <ChevronRight size={18} className="text-gray-400"/>
+                    </button>
+
+                    {/* Tombol Struk */}
                     <button onClick={() => router.push('/profile/store')} className="w-full flex items-center justify-between p-4 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
                         <div className="flex items-center gap-3">
                             <div className="p-2 bg-orange-100 dark:bg-orange-900/30 text-orange-600 rounded-lg"><Store size={18}/></div>
