@@ -99,8 +99,10 @@ export default function AddProduct() {
                 <button onClick={() => setShowScanner(false)} className="p-2 bg-gray-800 hover:bg-red-500 rounded-full transition-colors"><X size={20}/></button>
             </div>
             <div className="flex-1 relative bg-black">
-                {/* Komponen Scanner dari Kasir */}
-                <Scanner onScan={handleScanSuccess} />
+                <Scanner 
+                    onScan={handleScanSuccess} 
+                    onClose={() => setShowScanner(false)} 
+                />
                 <div className="absolute bottom-10 left-0 right-0 text-center text-white text-sm animate-pulse drop-shadow-md">
                     Arahkan garis kamera ke barcode...
                 </div>
