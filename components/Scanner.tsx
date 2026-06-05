@@ -101,24 +101,7 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
                    <X size={20} />
                </button>
            </div>
-           
-           {cameras.length > 0 && (
-               <div className="bg-gray-800 p-2 rounded-xl border border-gray-600 flex items-center gap-2">
-                   <span className="text-xs text-gray-400 whitespace-nowrap">Lensa:</span>
-                   <select 
-                       className="bg-transparent text-sm font-medium w-full outline-none truncate"
-                       value={selectedCameraId}
-                       onChange={(e) => setSelectedCameraId(e.target.value)}
-                   >
-                       {/* Menampilkan daftar kamera asli dari HP */}
-                       {cameras.map((cam, idx) => (
-                           <option key={cam.id} value={cam.id} className="text-black">
-                               {cam.label || `Kamera ${idx}`}
-                           </option>
-                       ))}
-                   </select>
-               </div>
-           )}
+
        </div>
 
        <div className="flex-1 flex flex-col justify-center items-center bg-black relative pt-20">
