@@ -14,7 +14,8 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
   const [scannerInstance, setScannerInstance] = useState<Html5Qrcode | null>(null)
   
   const [cameras, setCameras] = useState<{id: string, label: string}[]>([])
-  const [selectedCameraId, setSelectedCameraId] = useState<string>('environment')
+  // Dikosongkan di awal, nanti langsung diisi dengan ID Kamera urutan 0
+  const [selectedCameraId, setSelectedCameraId] = useState<string>('')
 
   useEffect(() => {
     const html5QrCode = new Html5Qrcode("reader")
@@ -22,9 +23,9 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
 
     Html5Qrcode.getCameras().then(devices => {
       if (devices && devices.length > 0) {
-        // Balik urutan kamera agar kamera belakang (biasanya urutan terakhir di Android) 
-        // lebih mudah ditemukan di daftar
-        setCameras(devices.reverse())
+        setCameras(devices)
+        // LANGSUNG TEMBAK: Pilih kamera urutan pertama (index 0) agar langsung aktif
+        setSelectedCameraId(devices[0].id)
       }
     }).catch(err => {
       console.log("Daftar kamera tidak dapat diambil")
@@ -38,29 +39,23 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
   }, [])
 
   useEffect(() => {
-    if (!scannerInstance) return
+    // Jangan mulai kalau belum dapet ID Kamera
+    if (!scannerInstance || !selectedCameraId) return
 
     const startScanner = async () => {
       if (scannerInstance.isScanning) {
         await scannerInstance.stop().catch(console.error)
       }
 
-      // PERBAIKAN KUNCI: Kita hapus videoConstraints dari sini!
-      // Membiarkannya bersih memastikan ID Kamera (Lensa) TIDAK diabaikan.
       const config = {
         fps: 15,
         qrbox: { width: 250, height: 250 },
         aspectRatio: 1.0
       }
 
-      // Memaksa sistem mencari kamera menghadap belakang secara mutlak ("exact")
-      let cameraConfig: any = selectedCameraId
-      if (selectedCameraId === 'environment') {
-          cameraConfig = { facingMode: { exact: "environment" } }
-      }
-
+      // Langsung oper ID Kamera aslinya, tanpa bumbu-bumbu setting lain
       scannerInstance.start(
-        cameraConfig, 
+        selectedCameraId, 
         config, 
         (decodedText) => {
           scannerInstance.stop().then(() => {
@@ -71,13 +66,7 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
       ).then(() => {
           tryZoom(scannerInstance, 2)
       }).catch(err => {
-          console.error("Gagal start exact environment:", err)
-          // Jika HP menolak perintah "exact" (HP tipe lama), kita fallback ke mode normal
-          if (selectedCameraId === 'environment') {
-              scannerInstance.start({ facingMode: "environment" }, config, (text) => {
-                  scannerInstance.stop().then(() => onScan(text))
-              }, () => {}).catch(console.error)
-          }
+          console.error("Gagal start kamera:", err)
       })
     }
 
@@ -113,22 +102,23 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
                </button>
            </div>
            
-           <div className="bg-gray-800 p-2 rounded-xl border border-gray-600 flex items-center gap-2">
-               <span className="text-xs text-gray-400 whitespace-nowrap">Lensa:</span>
-               <select 
-                   className="bg-transparent text-sm font-medium w-full outline-none truncate"
-                   value={selectedCameraId}
-                   onChange={(e) => setSelectedCameraId(e.target.value)}
-               >
-                   <option value="environment" className="text-black">Kamera Belakang (Otomatis)</option>
-                   
-                   {cameras.map((cam, idx) => (
-                       <option key={cam.id} value={cam.id} className="text-black">
-                           {cam.label || `Lensa ke-${idx + 1}`}
-                       </option>
-                   ))}
-               </select>
-           </div>
+           {cameras.length > 0 && (
+               <div className="bg-gray-800 p-2 rounded-xl border border-gray-600 flex items-center gap-2">
+                   <span className="text-xs text-gray-400 whitespace-nowrap">Lensa:</span>
+                   <select 
+                       className="bg-transparent text-sm font-medium w-full outline-none truncate"
+                       value={selectedCameraId}
+                       onChange={(e) => setSelectedCameraId(e.target.value)}
+                   >
+                       {/* Menampilkan daftar kamera asli dari HP */}
+                       {cameras.map((cam, idx) => (
+                           <option key={cam.id} value={cam.id} className="text-black">
+                               {cam.label || `Kamera ${idx + 1}`}
+                           </option>
+                       ))}
+                   </select>
+               </div>
+           )}
        </div>
 
        <div className="flex-1 flex flex-col justify-center items-center bg-black relative pt-20">
