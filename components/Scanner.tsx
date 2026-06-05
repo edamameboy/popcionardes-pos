@@ -25,7 +25,7 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
       if (devices && devices.length > 0) {
         setCameras(devices)
         // LANGSUNG TEMBAK: Pilih kamera urutan pertama (index 0) agar langsung aktif
-        setSelectedCameraId(devices[0].id)
+        setSelectedCameraId(devices[4].id)
       }
     }).catch(err => {
       console.log("Daftar kamera tidak dapat diambil")
