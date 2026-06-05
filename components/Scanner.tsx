@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode'
+import { Html5Qrcode } from 'html5-qrcode'
 import { X, ZoomIn, ZoomOut } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -14,7 +14,7 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
   const [scannerInstance, setScannerInstance] = useState<Html5Qrcode | null>(null)
 
   useEffect(() => {
-    // Render instance dan batasi format barcode agar scanning lebih cepat dan fokus
+    // Render instance
     const html5QrCode = new Html5Qrcode("reader")
     setScannerInstance(html5QrCode)
 
@@ -22,33 +22,27 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
       fps: 15,
       qrbox: { width: 250, height: 250 },
       aspectRatio: 1.0,
-      disableFlip: false,
       videoConstraints: {
-          facingMode: "environment",
+          // TRIK IPHONE: Minta resolusi tinggi agar barcode tetap terbaca meski dari jauh
           width: { ideal: 1920 },
-          height: { ideal: 1080 }
+          height: { ideal: 1080 },
+          facingMode: "environment"
       }
     }
 
-    // PERBAIKAN: Pindahkan video constraints ke parameter pertama (Camera Device Configuration)
-    // Memaksa browser meminta resolusi minimum HD dan mengaktifkan fitur Auto-Focus Continuous
-    const cameraConstraints = {
-        facingMode: "environment",
-        width: { min: 1280, ideal: 1920, max: 2560 },
-        height: { min: 720, ideal: 1080, max: 1440 },
-        advanced: [{ focusMode: "continuous" } as any] 
-    }
-
     html5QrCode.start(
-      cameraConstraints, 
+      { facingMode: "environment" }, 
       config, 
       (decodedText) => {
+        // Jika berhasil scan, bunyikan "Beep" (opsional) lalu tutup
         html5QrCode.stop().then(() => {
             onScan(decodedText)
         })
       },
       (error) => { /* Abaikan error frame pencarian */ }
     ).then(() => {
+        // Coba apply Zoom 2.0x secara otomatis (jika HP mendukung) 
+        // Ini membantu lensa utama iPhone fokus dari jarak jauh
         tryZoom(html5QrCode, 2)
     }).catch(err => {
         toast.error("Gagal membuka kamera. Pastikan izin kamera aktif.")
@@ -64,6 +58,7 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
 
   const tryZoom = (instance: Html5Qrcode, targetZoom: number) => {
     try {
+        // Tambahkan "as any" di sini agar TypeScript tidak komplain
         instance.applyVideoConstraints({ advanced: [{ zoom: targetZoom } as any] })
         setZoom(targetZoom)
     } catch(e) {
@@ -93,7 +88,7 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
        <div className="flex-1 flex flex-col justify-center items-center bg-black relative">
             <div id="reader" className="w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl"></div>
             
-            {/* INSTRUKSI */}
+            {/* INSTRUKSI IPHONE */}
             <p className="text-white text-xs text-center mt-6 px-8 opacity-70">
                 Arahkan barcode ke kotak. Jika buram (susah fokus), jauhkan HP Anda lalu gunakan tombol Zoom.
             </p>
