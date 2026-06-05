@@ -14,20 +14,20 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
   const [scannerInstance, setScannerInstance] = useState<Html5Qrcode | null>(null)
   
   const [cameras, setCameras] = useState<{id: string, label: string}[]>([])
-  // Kita jadikan 'environment' sebagai default mutlak (Sistem akan memaksa cari kamera belakang utama)
   const [selectedCameraId, setSelectedCameraId] = useState<string>('environment')
 
   useEffect(() => {
     const html5QrCode = new Html5Qrcode("reader")
     setScannerInstance(html5QrCode)
 
-    // Ambil daftar kamera untuk opsi dropdown (jika kasir ingin ganti lensa)
     Html5Qrcode.getCameras().then(devices => {
       if (devices && devices.length > 0) {
-        setCameras(devices)
+        // Balik urutan kamera agar kamera belakang (biasanya urutan terakhir di Android) 
+        // lebih mudah ditemukan di daftar
+        setCameras(devices.reverse())
       }
     }).catch(err => {
-      console.log("Daftar kamera tidak dapat diambil, menggunakan kamera default.")
+      console.log("Daftar kamera tidak dapat diambil")
     })
 
     return () => {
@@ -45,20 +45,19 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
         await scannerInstance.stop().catch(console.error)
       }
 
+      // PERBAIKAN KUNCI: Kita hapus videoConstraints dari sini!
+      // Membiarkannya bersih memastikan ID Kamera (Lensa) TIDAK diabaikan.
       const config = {
         fps: 15,
         qrbox: { width: 250, height: 250 },
-        aspectRatio: 1.0,
-        videoConstraints: {
-          width: { ideal: 1920 },
-          height: { ideal: 1080 }
-        }
+        aspectRatio: 1.0
       }
 
-      // KUNCI PERBAIKAN: Jika 'environment', minta sistem otomatis pilihkan kamera belakang terbaik
-      const cameraConfig = selectedCameraId === 'environment' 
-            ? { facingMode: "environment" } 
-            : selectedCameraId
+      // Memaksa sistem mencari kamera menghadap belakang secara mutlak ("exact")
+      let cameraConfig: any = selectedCameraId
+      if (selectedCameraId === 'environment') {
+          cameraConfig = { facingMode: { exact: "environment" } }
+      }
 
       scannerInstance.start(
         cameraConfig, 
@@ -68,11 +67,17 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
               onScan(decodedText)
           })
         },
-        (error) => { /* Abaikan log error saat mencari barcode */ }
+        (error) => { /* Abaikan log pencarian */ }
       ).then(() => {
           tryZoom(scannerInstance, 2)
       }).catch(err => {
-          console.error("Gagal start kamera:", err)
+          console.error("Gagal start exact environment:", err)
+          // Jika HP menolak perintah "exact" (HP tipe lama), kita fallback ke mode normal
+          if (selectedCameraId === 'environment') {
+              scannerInstance.start({ facingMode: "environment" }, config, (text) => {
+                  scannerInstance.stop().then(() => onScan(text))
+              }, () => {}).catch(console.error)
+          }
       })
     }
 
@@ -108,7 +113,6 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
                </button>
            </div>
            
-           {/* DROPDOWN KAMERA */}
            <div className="bg-gray-800 p-2 rounded-xl border border-gray-600 flex items-center gap-2">
                <span className="text-xs text-gray-400 whitespace-nowrap">Lensa:</span>
                <select 
@@ -116,13 +120,11 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
                    value={selectedCameraId}
                    onChange={(e) => setSelectedCameraId(e.target.value)}
                >
-                   {/* Pilihan Wajib Pertama */}
-                   <option value="environment" className="text-black">Kamera Belakang (Default)</option>
+                   <option value="environment" className="text-black">Kamera Belakang (Otomatis)</option>
                    
-                   {/* Sisa daftar kamera dari sistem */}
                    {cameras.map((cam, idx) => (
                        <option key={cam.id} value={cam.id} className="text-black">
-                           {cam.label || `Lensa Tambahan ${idx + 1}`}
+                           {cam.label || `Lensa ke-${idx + 1}`}
                        </option>
                    ))}
                </select>
@@ -133,7 +135,7 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
             <div id="reader" className="w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl bg-gray-900 min-h-[250px]"></div>
             
             <p className="text-white text-xs text-center mt-6 px-8 opacity-70">
-                Arahkan barcode ke kotak. Jika buram, ganti opsi "Lensa" di atas ke Lensa Tambahan.
+                Arahkan barcode ke kotak. Jika buram, ganti "Lensa" atau gunakan tombol Zoom.
             </p>
        </div>
 
