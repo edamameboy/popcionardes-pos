@@ -4,7 +4,7 @@ import { createClient } from '@/utils/supabase/client'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, Save, Package, Barcode as BarcodeIcon, Tag, DollarSign, Layers, Camera, X } from 'lucide-react'
 import toast from 'react-hot-toast'
-import Scanner from '@/components/Scanner' // Mengimpor komponen scanner kamera
+import Scanner from '@/components/Scanner' 
 
 export default function AddProduct() {
   const [formData, setFormData] = useState({
@@ -16,7 +16,7 @@ export default function AddProduct() {
   })
   const [loading, setLoading] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
-  const [showScanner, setShowScanner] = useState(false) // State untuk memunculkan kamera
+  const [showScanner, setShowScanner] = useState(false) 
   
   const barcodeInputRef = useRef<HTMLInputElement>(null)
   const supabase = createClient()
@@ -28,6 +28,30 @@ export default function AddProduct() {
         barcodeInputRef.current.focus()
     }
   }, [])
+
+  // ==========================================
+  // FITUR BARU: AUTOFILL SKU UNTUK FUNKO
+  // ==========================================
+  useEffect(() => {
+    const namaProduk = formData.name.toLowerCase()
+    const barcode = formData.barcode.trim()
+
+    // Cek apakah nama ada kata "funko" dan barcode panjangnya wajar (minimal 11/12 angka)
+    if (namaProduk.includes('funko') && barcode.length >= 11) {
+        
+        // Logika Ekstraksi: Ambil 5 angka tepat sebelum digit terakhir (Check Digit)
+        // Contoh: 889698[52427]8 (12 digit) -> memotong dari index belakang
+        const extractedDigits = barcode.substring(barcode.length - 6, barcode.length - 1)
+        const otomatisSku = `FUN${extractedDigits}`
+        
+        // Update state SKU jika nilainya berbeda (untuk mencegah infinite loop)
+        if (formData.sku !== otomatisSku) {
+            setFormData(prev => ({ ...prev, sku: otomatisSku }))
+            toast.success(`SKU Otomatis Dibuat: ${otomatisSku}`, { icon: '✨', id: 'sku-toast' })
+        }
+    }
+  }, [formData.name, formData.barcode]) // Akan berjalan setiap kali Nama atau Barcode berubah
+  // ==========================================
 
   const checkRole = async () => {
     const { data: { user } } = await supabase.auth.getUser()
@@ -47,10 +71,9 @@ export default function AddProduct() {
     setFormData(prev => ({ ...prev, [name]: value }))
   }
 
-  // Fungsi yang dipanggil saat kamera berhasil membaca barcode
   const handleScanSuccess = (result: string) => {
     setFormData(prev => ({ ...prev, barcode: result }))
-    setShowScanner(false) // Tutup kamera
+    setShowScanner(false) 
     toast.success("Barcode terdeteksi!")
   }
 
@@ -91,7 +114,6 @@ export default function AddProduct() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-900 pb-24 transition-colors duration-300">
       
-      {/* --- POPUP KAMERA SCANNER --- */}
       {showScanner && (
         <div className="fixed inset-0 z-[100] bg-black flex flex-col">
             <div className="flex justify-between items-center p-4 bg-gray-900 text-white shadow-md">
@@ -99,10 +121,7 @@ export default function AddProduct() {
                 <button onClick={() => setShowScanner(false)} className="p-2 bg-gray-800 hover:bg-red-500 rounded-full transition-colors"><X size={20}/></button>
             </div>
             <div className="flex-1 relative bg-black">
-                <Scanner 
-                    onScan={handleScanSuccess} 
-                    onClose={() => setShowScanner(false)} 
-                />
+                <Scanner onScan={handleScanSuccess} onClose={() => setShowScanner(false)} />
                 <div className="absolute bottom-10 left-0 right-0 text-center text-white text-sm animate-pulse drop-shadow-md">
                     Arahkan garis kamera ke barcode...
                 </div>
@@ -110,7 +129,6 @@ export default function AddProduct() {
         </div>
       )}
 
-      {/* HEADER */}
       <div className="bg-white dark:bg-slate-800 p-4 sticky top-0 z-20 shadow-sm border-b dark:border-slate-700 flex items-center gap-3">
         <button 
             onClick={() => router.push('/inventory')} 
@@ -130,7 +148,6 @@ export default function AddProduct() {
         <form onSubmit={handleSubmit} className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
             
             <div className="p-5 space-y-5">
-                {/* BARCODE INPUT & TOMBOL KAMERA */}
                 <div>
                     <label className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1 flex items-center gap-1.5"><BarcodeIcon size={14}/> Barcode</label>
                     <div className="flex gap-2">
@@ -143,7 +160,6 @@ export default function AddProduct() {
                             placeholder="Ketik atau pakai alat scanner..." 
                             className="flex-1 w-full border dark:border-slate-600 p-3.5 rounded-xl bg-gray-50 dark:bg-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-pop-green transition-all"
                         />
-                        {/* Tombol Pemanggil Kamera */}
                         <button 
                             type="button" 
                             onClick={() => setShowScanner(true)}
@@ -154,7 +170,6 @@ export default function AddProduct() {
                     </div>
                 </div>
 
-                {/* NAMA PRODUK */}
                 <div>
                     <label className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1 flex items-center gap-1.5"><Package size={14}/> Nama Produk <span className="text-red-500">*</span></label>
                     <input 
@@ -163,12 +178,11 @@ export default function AddProduct() {
                         value={formData.name}
                         onChange={handleChange}
                         required
-                        placeholder="Cth: Kopi Susu Aren" 
+                        placeholder="Cth: Funko Pop Spiderman" 
                         className="w-full border dark:border-slate-600 p-3.5 rounded-xl bg-gray-50 dark:bg-slate-900 dark:text-white font-bold outline-none focus:ring-2 focus:ring-pop-green transition-all"
                     />
                 </div>
 
-                {/* SKU */}
                 <div>
                     <label className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1 flex items-center gap-1.5"><Tag size={14}/> SKU (Kode Internal)</label>
                     <input 
@@ -182,7 +196,6 @@ export default function AddProduct() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
-                    {/* HARGA */}
                     <div>
                         <label className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1 flex items-center gap-1.5"><DollarSign size={14}/> Harga Jual <span className="text-red-500">*</span></label>
                         <div className="relative">
@@ -199,7 +212,6 @@ export default function AddProduct() {
                         </div>
                     </div>
 
-                    {/* STOK AWAL */}
                     <div>
                         <label className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1 flex items-center gap-1.5"><Layers size={14}/> Stok Awal</label>
                         <input 
@@ -214,7 +226,6 @@ export default function AddProduct() {
                 </div>
             </div>
 
-            {/* BUTTONS */}
             <div className="p-4 bg-gray-50 dark:bg-slate-900/50 border-t dark:border-slate-700 flex gap-3">
                 <button 
                     type="button"
