@@ -34,9 +34,18 @@ export default function UserManagement() {
   }
 
   const fetchUsers = async () => {
-    const { data, error } = await supabase.from('profiles').select('*').order('created_at', { ascending: true })
-    if (error) toast.error("Gagal memuat daftar pengguna")
-    if (data) setUsers(data)
+    const { data, error } = await supabase.from('profiles').select('*')
+    if (error) {
+        // Menampilkan pesan error asli dari Supabase agar mudah dilacak
+        toast.error("Gagal memuat: " + error.message)
+        console.error("Error Detail:", error)
+    } 
+    
+    if (data) {
+        // Kita urutkan namanya secara manual pakai JavaScript saja biar aman
+        const sortedData = data.sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''))
+        setUsers(sortedData)
+    }
     setLoading(false)
   }
 

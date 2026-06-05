@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Papa from 'papaparse' 
 import { Plus, Search, Trash2, Upload, Download, Edit, X, Save, Barcode, ArrowUpDown, ArrowUp, ArrowDown, Scale, ClipboardCheck, Minus } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { exportToCsv } from '@/utils/exportToCsv'
 
 export default function Inventory() {
   const [products, setProducts] = useState<any[]>([])
@@ -89,8 +90,98 @@ export default function Inventory() {
       setOpnameModal(false); setIsSavingOpname(false); fetchProducts(); toast.success("Stok berhasil di-opname!")
   }
 
-  const handleExportCSV = () => { /* ... kode export ... */ }
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => { /* ... kode upload ... */ }
+  const handleExport = () => {
+    // Membuat 1 baris data contoh (dummy) agar user tahu cara mengisinya
+    const templateData = [
+      {
+        ID: '', // Sengaja dikosongkan. Jika kosong = Tambah Barang Baru
+        Barcode: '899123456789',
+        Nama_Produk: 'Contoh Produk Kopi Susu',
+        SKU_atau_Deskripsi: 'KPS-200ML',
+        Harga_Jual: 15000,
+        Stok_Saat_Ini: 100
+      }
+    ]
+
+    // Ingat urutannya: (namaFile, data)
+    exportToCsv('Template_Mass_Upload_Produk', templateData)
+    
+    toast.success("Template CSV berhasil diunduh!")
+  }
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setIsUploading(true)
+    const loadToast = toast.loading('Memproses file CSV...')
+
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: async (results) => {
+        try {
+          const rows = results.data
+          const productsToUpsert = rows.map((row: any) => {
+            // Membaca nama kolom sesuai dengan format Export kita
+            const idStr = row['ID']
+            const id = idStr && idStr.trim() !== '' ? parseInt(idStr) : undefined
+            
+            const name = row['Nama_Produk'] || row['Nama']
+            // Bersihkan angka dari format uang (jika ada Rp atau koma)
+            const price = parseInt(String(row['Harga_Jual'] || 0).replace(/[^0-9]/g, '')) || 0
+            const stock = parseInt(String(row['Stok_Saat_Ini'] || row['Stok'] || 0).replace(/[^0-9-]/g, '')) || 0
+            
+            const barcode = row['Barcode'] && row['Barcode'] !== '-' ? row['Barcode'].toString().trim() : null
+            const description = row['SKU_atau_Deskripsi'] && row['SKU_atau_Deskripsi'] !== '-' ? row['SKU_atau_Deskripsi'].toString().trim() : null
+
+            // Lewati jika nama produk kosong
+            if (!name || name.trim() === '') return null 
+
+            const productData: any = {
+              name: name.trim(),
+              price: price,
+              stock: stock,
+              barcode: barcode,
+              description: description
+            }
+
+            // Jika ada ID (barang lama), sertakan ID agar Supabase melakukan Update
+            if (id && !isNaN(id)) {
+              productData.id = id
+            }
+
+            return productData
+          }).filter(Boolean) // Buang data yang null (kosong)
+
+          if (productsToUpsert.length === 0) {
+             throw new Error("File kosong atau format nama kolom tidak sesuai.")
+          }
+
+          // Lakukan operasi INSERT (baru) atau UPDATE (lama) sekaligus
+          const { error } = await supabase.from('products').upsert(productsToUpsert)
+          
+          if (error) throw error
+
+          toast.success(`${productsToUpsert.length} data master berhasil disinkronkan!`, { id: loadToast })
+          fetchProducts() // Refresh tabel inventory
+
+        } catch (error: any) {
+          toast.error(`Gagal import: ${error.message}`, { id: loadToast })
+        } finally {
+          setIsUploading(false)
+          // Reset input file agar bisa pilih file yang sama lagi
+          if (fileInputRef.current) fileInputRef.current.value = ''
+        }
+      },
+      error: (error) => {
+        toast.error(`Gagal membaca file: ${error.message}`, { id: loadToast })
+        setIsUploading(false)
+        if (fileInputRef.current) fileInputRef.current.value = ''
+      }
+    })
+  }
+
   const handleExportOpnameCSV = () => {
     if (products.length === 0) return toast.error("Belum ada data untuk diexport.")
     const csvData = products.map(p => ({ 'ID': p.id, 'Nama Produk': p.name, 'Stok Sistem (Jangan Diubah)': p.stock, 'Stok Fisik (Isi Disini)': '', 'Alasan (Opsional)': '' }))
@@ -158,7 +249,7 @@ export default function Inventory() {
                 {isAdmin && (
                     <div className="flex overflow-x-auto no-scrollbar rounded-xl shadow-sm border border-blue-200 dark:border-blue-900/30 w-full lg:w-auto">
                         <div className="bg-blue-50 dark:bg-blue-900/20 px-3 py-2 text-xs font-bold text-blue-700 dark:text-blue-400 flex items-center whitespace-nowrap shrink-0">DATA MASTER</div>
-                        <button onClick={handleExportCSV} className="shrink-0 bg-white dark:bg-slate-800 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 px-3 py-2 text-sm border-l border-blue-100 dark:border-slate-700 flex items-center gap-1 font-medium transition-colors"><Download size={16}/> Export</button>
+                        <button onClick={handleExport} className="shrink-0 bg-white dark:bg-slate-800 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 px-3 py-2 text-sm border-l border-blue-100 dark:border-slate-700 flex items-center gap-1 font-medium transition-colors"><Download size={16}/> Template</button>
                         <input type="file" accept=".csv" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
                         <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="shrink-0 bg-white dark:bg-slate-800 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 px-3 py-2 text-sm border-l border-blue-100 dark:border-slate-700 flex items-center gap-1 font-medium transition-colors">{isUploading ? '⏳' : <><Upload size={16}/> Import</>}</button>
                     </div>
