@@ -13,26 +13,21 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
   const [zoom, setZoom] = useState(1)
   const [scannerInstance, setScannerInstance] = useState<Html5Qrcode | null>(null)
   
-  // State untuk menyimpan daftar kamera dan kamera yang sedang dipilih
   const [cameras, setCameras] = useState<{id: string, label: string}[]>([])
-  const [selectedCameraId, setSelectedCameraId] = useState<string>('')
+  // Kita jadikan 'environment' sebagai default mutlak (Sistem akan memaksa cari kamera belakang utama)
+  const [selectedCameraId, setSelectedCameraId] = useState<string>('environment')
 
-  // 1. Inisiasi Scanner dan Ambil Daftar Kamera
   useEffect(() => {
     const html5QrCode = new Html5Qrcode("reader")
     setScannerInstance(html5QrCode)
 
-    // Meminta izin dan mengambil semua lensa kamera yang ada di HP
+    // Ambil daftar kamera untuk opsi dropdown (jika kasir ingin ganti lensa)
     Html5Qrcode.getCameras().then(devices => {
-      if (devices && devices.length) {
+      if (devices && devices.length > 0) {
         setCameras(devices)
-        
-        // Coba cari kamera yang ada kata "back" (belakang), jika tidak ada pakai kamera pertama
-        const backCamera = devices.find(c => c.label.toLowerCase().includes('back'))
-        setSelectedCameraId(backCamera ? backCamera.id : devices[0].id)
       }
     }).catch(err => {
-      toast.error("Gagal mendapatkan daftar kamera. Pastikan izin kamera aktif.")
+      console.log("Daftar kamera tidak dapat diambil, menggunakan kamera default.")
     })
 
     return () => {
@@ -42,12 +37,10 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
     }
   }, [])
 
-  // 2. Jalankan Kamera saat Kamera Dipilih / Diganti
   useEffect(() => {
-    if (!scannerInstance || !selectedCameraId) return
+    if (!scannerInstance) return
 
     const startScanner = async () => {
-      // Jika kamera sedang nyala (karena user ganti lensa), matikan dulu
       if (scannerInstance.isScanning) {
         await scannerInstance.stop().catch(console.error)
       }
@@ -62,16 +55,20 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
         }
       }
 
-      // Mulai scan menggunakan ID KAMERA SPESIFIK yang dipilih
+      // KUNCI PERBAIKAN: Jika 'environment', minta sistem otomatis pilihkan kamera belakang terbaik
+      const cameraConfig = selectedCameraId === 'environment' 
+            ? { facingMode: "environment" } 
+            : selectedCameraId
+
       scannerInstance.start(
-        selectedCameraId, 
+        cameraConfig, 
         config, 
         (decodedText) => {
           scannerInstance.stop().then(() => {
               onScan(decodedText)
           })
         },
-        (error) => { /* Abaikan error frame */ }
+        (error) => { /* Abaikan log error saat mencari barcode */ }
       ).then(() => {
           tryZoom(scannerInstance, 2)
       }).catch(err => {
@@ -87,7 +84,7 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
         instance.applyVideoConstraints({ advanced: [{ zoom: targetZoom } as any] })
         setZoom(targetZoom)
     } catch(e) {
-        // Fitur zoom diabaikan jika lensa tidak mendukung
+        // Abaikan jika device tidak support zoom
     }
   }
 
@@ -101,7 +98,6 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
 
   return (
     <div className="fixed inset-0 z-[100] bg-black flex flex-col select-none">
-       {/* HEADER & PILIHAN KAMERA */}
        <div className="p-4 bg-black/80 text-white absolute top-0 w-full z-10 space-y-3 pb-4">
            <div className="flex justify-between items-center">
                <h3 className="font-bold tracking-widest flex items-center gap-2">
@@ -112,35 +108,35 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
                </button>
            </div>
            
-           {/* DROPDOWN PEMILIH LENSA KAMERA */}
-           {cameras.length > 1 && (
-               <div className="bg-gray-800 p-2 rounded-xl border border-gray-600 flex items-center gap-2">
-                   <span className="text-xs text-gray-400 whitespace-nowrap">Lensa:</span>
-                   <select 
-                       className="bg-transparent text-sm font-medium w-full outline-none truncate"
-                       value={selectedCameraId}
-                       onChange={(e) => setSelectedCameraId(e.target.value)}
-                   >
-                       {cameras.map((cam, idx) => (
-                           <option key={cam.id} value={cam.id} className="text-black">
-                               {cam.label || `Kamera ${idx + 1}`}
-                           </option>
-                       ))}
-                   </select>
-               </div>
-           )}
+           {/* DROPDOWN KAMERA */}
+           <div className="bg-gray-800 p-2 rounded-xl border border-gray-600 flex items-center gap-2">
+               <span className="text-xs text-gray-400 whitespace-nowrap">Lensa:</span>
+               <select 
+                   className="bg-transparent text-sm font-medium w-full outline-none truncate"
+                   value={selectedCameraId}
+                   onChange={(e) => setSelectedCameraId(e.target.value)}
+               >
+                   {/* Pilihan Wajib Pertama */}
+                   <option value="environment" className="text-black">Kamera Belakang (Default)</option>
+                   
+                   {/* Sisa daftar kamera dari sistem */}
+                   {cameras.map((cam, idx) => (
+                       <option key={cam.id} value={cam.id} className="text-black">
+                           {cam.label || `Lensa Tambahan ${idx + 1}`}
+                       </option>
+                   ))}
+               </select>
+           </div>
        </div>
 
-       {/* KOTAK SCANNER */}
        <div className="flex-1 flex flex-col justify-center items-center bg-black relative pt-20">
             <div id="reader" className="w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl bg-gray-900 min-h-[250px]"></div>
             
             <p className="text-white text-xs text-center mt-6 px-8 opacity-70">
-                Arahkan barcode ke kotak. Jika buram, ganti "Lensa" di atas atau gunakan Zoom.
+                Arahkan barcode ke kotak. Jika buram, ganti opsi "Lensa" di atas ke Lensa Tambahan.
             </p>
        </div>
 
-       {/* CONTROLS (ZOOM) */}
        <div className="p-8 bg-black/80 flex justify-center gap-6 pb-safe relative z-10">
            <button 
                 onClick={() => handleManualZoom('out')} 
