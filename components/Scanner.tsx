@@ -113,7 +113,7 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
                        {/* Menampilkan daftar kamera asli dari HP */}
                        {cameras.map((cam, idx) => (
                            <option key={cam.id} value={cam.id} className="text-black">
-                               {cam.label || `Kamera ${idx + 1}`}
+                               {cam.label || `Kamera ${idx}`}
                            </option>
                        ))}
                    </select>
