@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { useRouter } from 'next/navigation'
-import { User, LogOut, Moon, Sun, MonitorSmartphone, ShieldCheck, Store, Database, Trash2, ChevronRight, Package, ShoppingCart, Users } from 'lucide-react'
+import { User, LogOut, Moon, Sun, MonitorSmartphone, ShieldCheck, Store, Database, Trash2, ChevronRight, Package, ShoppingCart, Users, Download } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import toast from 'react-hot-toast'
 
@@ -12,6 +12,10 @@ export default function Profile() {
   const [loading, setLoading] = useState(true)
   const [mounted, setMounted] = useState(false)
   
+  // STATE UNTUK PWA INSTALL
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null)
+  const [isInstallable, setIsInstallable] = useState(false)
+  
   const { theme, setTheme } = useTheme()
   const supabase = createClient()
   const router = useRouter()
@@ -19,6 +23,30 @@ export default function Profile() {
   useEffect(() => {
     setMounted(true)
     fetchUser()
+
+    // LISENER UNTUK PWA INSTALL PROMPT
+    const handleBeforeInstallPrompt = (e: Event) => {
+      // Mencegah prompt bawaan browser muncul otomatis
+      e.preventDefault()
+      // Simpan event agar bisa dipicu oleh tombol kita nanti
+      setDeferredPrompt(e)
+      // Tampilkan tombol Install di UI
+      setIsInstallable(true)
+    }
+
+    const handleAppInstalled = () => {
+      // Sembunyikan tombol jika sudah berhasil diinstal
+      setIsInstallable(false)
+      setDeferredPrompt(null)
+    }
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+    window.addEventListener('appinstalled', handleAppInstalled)
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+      window.removeEventListener('appinstalled', handleAppInstalled)
+    }
   }, [])
 
   const fetchUser = async () => {
@@ -31,6 +59,26 @@ export default function Profile() {
       router.push('/login')
     }
     setLoading(false)
+  }
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) {
+      toast.error("Instalasi tidak didukung atau sudah diinstal.")
+      return
+    }
+    
+    // Munculkan popup instalasi bawaan sistem/browser
+    deferredPrompt.prompt()
+    
+    // Tunggu pilihan user (Install atau Batal)
+    const { outcome } = await deferredPrompt.userChoice
+    if (outcome === 'accepted') {
+      toast.success("Mulai menginstal aplikasi...")
+    }
+    
+    // Reset state setelah prompt digunakan
+    setDeferredPrompt(null)
+    setIsInstallable(false)
   }
 
   const handleLogout = async () => {
@@ -48,7 +96,6 @@ export default function Profile() {
     }
   }
 
-  // LOGIKA TAMPILAN ROLE (WARNA & TEKS DINAMIS)
   const getRoleDisplay = () => {
       const role = profile?.role
       if (role === 'admin') {
@@ -130,7 +177,6 @@ export default function Profile() {
                 <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 ml-2">Pengaturan Admin</h3>
                 <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden transition-colors">
                     
-                    {/* Tombol Pengguna */}
                     <button onClick={() => router.push('/profile/users')} className="w-full flex items-center justify-between p-4 border-b border-gray-50 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
                         <div className="flex items-center gap-3">
                             <div className="p-2 bg-blue-100 dark:bg-blue-900/30 text-blue-600 rounded-lg"><Users size={18}/></div>
@@ -139,7 +185,6 @@ export default function Profile() {
                         <ChevronRight size={18} className="text-gray-400"/>
                     </button>
 
-                    {/* Tombol Struk */}
                     <button onClick={() => router.push('/profile/store')} className="w-full flex items-center justify-between p-4 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
                         <div className="flex items-center gap-3">
                             <div className="p-2 bg-orange-100 dark:bg-orange-900/30 text-orange-600 rounded-lg"><Store size={18}/></div>
@@ -155,6 +200,21 @@ export default function Profile() {
         <div>
             <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 ml-2">Sistem</h3>
             <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden transition-colors">
+                
+                {/* TOMBOL INSTALL PWA (Hanya muncul jika belum diinstal & browser mendukung) */}
+                {isInstallable && (
+                    <button onClick={handleInstallClick} className="w-full flex items-center justify-between p-4 border-b border-gray-50 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 rounded-lg"><Download size={18}/></div>
+                            <div className="text-left">
+                                <div className="font-medium text-gray-700 dark:text-gray-200">Install ke Home Screen</div>
+                                <div className="text-[10px] text-gray-400">Jadikan aplikasi native di HP Anda</div>
+                            </div>
+                        </div>
+                        <ChevronRight size={18} className="text-gray-400"/>
+                    </button>
+                )}
+
                 <button onClick={handleClearCache} className="w-full flex items-center justify-between p-4 border-b border-gray-50 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
                     <div className="flex items-center gap-3">
                         <div className="p-2 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-lg"><Database size={18}/></div>
@@ -165,6 +225,7 @@ export default function Profile() {
                     </div>
                     <Trash2 size={18} className="text-gray-400"/>
                 </button>
+                
                 <button onClick={handleLogout} className="w-full flex items-center gap-3 p-4 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors group">
                     <div className="p-2 bg-red-100 dark:bg-red-900/30 text-red-600 rounded-lg group-hover:bg-red-200 dark:group-hover:bg-red-900/50 transition-colors"><LogOut size={18}/></div>
                     <span className="font-bold text-red-600">Keluar Akun (Logout)</span>
