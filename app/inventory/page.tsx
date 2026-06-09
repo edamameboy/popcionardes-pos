@@ -184,11 +184,32 @@ export default function Inventory() {
 
   const handleExportOpnameCSV = () => {
     if (products.length === 0) return toast.error("Belum ada data untuk diexport.")
-    const csvData = products.map(p => ({ 'ID': p.id, 'Nama Produk': p.name, 'Stok Sistem (Jangan Diubah)': p.stock, 'Stok Fisik (Isi Disini)': '', 'Alasan (Opsional)': '' }))
+    
+    // Perbaikan: Mengganti ID dengan Barcode di urutan pertama
+    const csvData = products.map(p => ({ 
+        'Barcode': p.barcode || '-', 
+        'SKU': p.sku || '-',
+        'Nama Produk': p.name || '-', 
+        'Stok Sistem (Jangan Diubah)': p.stock || 0, 
+        'Stok Fisik (Isi Disini)': '', 
+        'Alasan (Opsional)': '' 
+    }))
+    
     const csv = Papa.unparse(csvData)
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `Kertas_Kerja_Opname_${new Date().toISOString().split('T')[0]}.csv`; link.style.visibility = 'hidden'; document.body.appendChild(link); link.click(); document.body.removeChild(link)
+    const link = document.createElement("a"); 
+    
+    link.href = URL.createObjectURL(blob); 
+    link.download = `Kertas_Kerja_Opname_${new Date().toISOString().split('T')[0]}.csv`; 
+    link.style.visibility = 'hidden'; 
+    
+    document.body.appendChild(link); 
+    link.click(); 
+    document.body.removeChild(link)
+    
+    toast.success("Kertas Kerja berhasil diunduh!")
   }
+  
   const handleOpnameUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return; setIsUploading(true)
     Papa.parse(file, {
