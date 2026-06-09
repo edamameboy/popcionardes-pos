@@ -169,13 +169,20 @@ export default function Transactions() {
   const processedData = useMemo(() => {
     let result = [...transactions]
 
-    // 1. Search Filter (Customer Name atau Note)
+    // 1. Search Filter (Nama Produk atau Note)
     if (search) {
         const s = search.toLowerCase()
-        result = result.filter(t => 
-            (t.customer_name?.toLowerCase() || '').includes(s) || 
-            (t.note?.toLowerCase() || '').includes(s)
-        )
+        result = result.filter(t => {
+            // Cek apakah ada barang di dalam daftar items yang namanya mengandung kata pencarian
+            const matchProduct = t.items?.some((item: any) => 
+                (item.name || item.product_name || '').toLowerCase().includes(s)
+            )
+
+            // Cek juga apakah catatannya (note) mengandung kata pencarian
+            const matchNote = (t.note?.toLowerCase() || '').includes(s)
+
+            return matchProduct || matchNote
+        })
     }
 
     // 2. Event Filter

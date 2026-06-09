@@ -97,7 +97,7 @@ export default function Inventory() {
         ID: '', // Sengaja dikosongkan. Jika kosong = Tambah Barang Baru
         Barcode: '899123456789',
         Nama_Produk: 'Contoh Produk Kopi Susu',
-        SKU_atau_Deskripsi: 'KPS-200ML',
+        SKU: 'KPS-200ML',
         Harga_Jual: 15000,
         Stok_Saat_Ini: 100
       }
@@ -133,7 +133,7 @@ export default function Inventory() {
             const stock = parseInt(String(row['Stok_Saat_Ini'] || row['Stok'] || 0).replace(/[^0-9-]/g, '')) || 0
             
             const barcode = row['Barcode'] && row['Barcode'] !== '-' ? row['Barcode'].toString().trim() : null
-            const description = row['SKU_atau_Deskripsi'] && row['SKU_atau_Deskripsi'] !== '-' ? row['SKU_atau_Deskripsi'].toString().trim() : null
+            const sku = row['SKU'] && row['SKU'] !== '-' ? row['SKU'].toString().trim() : null
 
             // Lewati jika nama produk kosong
             if (!name || name.trim() === '') return null 
@@ -143,7 +143,7 @@ export default function Inventory() {
               price: price,
               stock: stock,
               barcode: barcode,
-              description: description
+              sku: sku
             }
 
             // Jika ada ID (barang lama), sertakan ID agar Supabase melakukan Update
