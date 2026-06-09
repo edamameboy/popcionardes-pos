@@ -211,26 +211,81 @@ export default function Inventory() {
   }
   
   const handleOpnameUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return; setIsUploading(true)
+    const file = e.target.files?.[0]; 
+    if (!file) return; 
+    setIsUploading(true)
+
     Papa.parse(file, {
-      header: true, skipEmptyLines: true,
+      header: true, 
+      skipEmptyLines: true,
       complete: async (results) => {
-        const rows = results.data; const adjustments: any[] = []; const productUpdates: any[] = []
+        const rows = results.data; 
+        const adjustments: any[] = []; 
+        const productUpdates: any[] = []
+
         rows.forEach((row: any) => {
-            const id = parseInt(row['ID']); const fisikStr = row['Stok Fisik (Isi Disini)']
-            if (!id || fisikStr === undefined || fisikStr === '') return
-            const fisik = parseInt(String(fisikStr).replace(/[^0-9-]/g, '')); if (isNaN(fisik)) return
-            const existing = products.find(p => p.id === id); if (!existing) return
+            // PERBAIKAN 1: Baca Barcode & Nama Produk, bukan ID lagi
+            const barcode = row['Barcode'] 
+            const namaProduk = row['Nama Produk']
+            const fisikStr = row['Stok Fisik (Isi Disini)']
+
+            // Jika fisik kosong/tidak diisi, langsung lewati baris ini
+            if (fisikStr === undefined || fisikStr === '') return
+
+            const fisik = parseInt(String(fisikStr).replace(/[^0-9-]/g, '')); 
+            if (isNaN(fisik)) return
+
+            // PERBAIKAN 2: Cari produk di database berdasarkan Barcode (atau Nama jika tidak ada barcode)
+            const existing = products.find(p => 
+                (barcode && barcode !== '-' && p.barcode === String(barcode).trim()) || 
+                (p.name === namaProduk)
+            ); 
+            
+            if (!existing) return
+
+            // Jika stok fisiknya beda dengan sistem, masukkan ke daftar update
             if (existing.stock !== fisik) {
-                adjustments.push({ product_id: existing.id, product_name: existing.name, old_stock: existing.stock, new_stock: fisik, difference: fisik - existing.stock, reason: row['Alasan (Opsional)'] || 'Mass Opname via CSV', user_name: userName })
+                adjustments.push({ 
+                    product_id: existing.id, 
+                    product_name: existing.name, 
+                    old_stock: existing.stock, 
+                    new_stock: fisik, 
+                    difference: fisik - existing.stock, 
+                    reason: row['Alasan (Opsional)'] || 'Mass Opname via CSV', 
+                    user_name: userName // Pastikan variabel userName sudah ada di file Anda
+                })
                 productUpdates.push({ ...existing, stock: fisik })
             }
         })
-        if (productUpdates.length === 0) { toast.error('Tidak ada selisih stok / format kosong. Opname selesai tanpa perubahan.'); setIsUploading(false); if (opnameInputRef.current) opnameInputRef.current.value = ''; return }
-        const { error: prodErr } = await supabase.from('products').upsert(productUpdates); if (prodErr) { toast.error('Gagal update stok: ' + prodErr.message); setIsUploading(false); return }
+
+        if (productUpdates.length === 0) { 
+            toast.error('Tidak ada selisih stok / tidak ada yang diisi. Opname dibatalkan.'); 
+            setIsUploading(false); 
+            if (opnameInputRef.current) opnameInputRef.current.value = ''; 
+            return 
+        }
+
+        // Simpan perubahan stok ke tabel products
+        const { error: prodErr } = await supabase.from('products').upsert(productUpdates); 
+        if (prodErr) { 
+            toast.error('Gagal update stok: ' + prodErr.message); 
+            setIsUploading(false); 
+            return 
+        }
+
+        // Catat riwayat perubahan ke tabel stock_adjustments
         await supabase.from('stock_adjustments').insert(adjustments)
-        toast.success(`Berhasil! ${productUpdates.length} produk mengalami penyesuaian stok.`); fetchProducts(); setIsUploading(false); if (opnameInputRef.current) opnameInputRef.current.value = '' 
-      }, error: (error) => { toast.error('Error membaca file: ' + error.message); setIsUploading(false) }
+
+        toast.success(`Berhasil! ${productUpdates.length} produk mengalami penyesuaian stok.`); 
+        fetchProducts(); 
+        setIsUploading(false); 
+        if (opnameInputRef.current) opnameInputRef.current.value = '' 
+        
+      }, 
+      error: (error) => { 
+          toast.error('Error membaca file: ' + error.message); 
+          setIsUploading(false) 
+      }
     })
   }
 
