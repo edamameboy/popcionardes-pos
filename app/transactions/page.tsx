@@ -66,12 +66,10 @@ export default function Transactions() {
   }
 
   const fetchTransactions = async () => {
-    // Hitung tanggal 30 hari yang lalu
     const thirtyDaysAgo = new Date()
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
     const startDateString = thirtyDaysAgo.toISOString()
 
-    // Tarik data hanya dari 30 hari terakhir dengan batas maksimal 1000 transaksi agar aman
     const { data } = await supabase
       .from('transactions')
       .select(`*, transaction_items ( quantity, price_at_purchase, products ( name ) )`)
@@ -88,26 +86,62 @@ export default function Transactions() {
 
     const { error } = await supabase.from('transactions').delete().eq('id', id)
     if (error) alert("Gagal menghapus! " + error.message)
-    else setTransactions(prev => prev.filter(t => t.id !== id))
+    else {
+        setTransactions(prev => prev.filter(t => t.id !== id))
+        toast.success("Transaksi berhasil divoid/dihapus")
+    }
   }
 
+  // ==========================================
+  // LOGIKA EDIT TRANSAKSI DIPERBARUI
+  // ==========================================
   const handleEdit = (t: any) => {
-    setEditData({ id: t.id, payment_method: t.payment_method, note: t.note || '', location_event: t.location_event || '', customer_name: t.customer_name || '', customer_phone: t.customer_phone || '' })
+    // Ubah format waktu UTC dari database ke format lokal YYYY-MM-DDTHH:mm 
+    // agar bisa dibaca oleh input kalender HTML (datetime-local)
+    const dateObj = new Date(t.created_at)
+    const localDateTime = new Date(dateObj.getTime() - dateObj.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+
+    setEditData({ 
+        id: t.id, 
+        payment_method: t.payment_method, 
+        note: t.note || '', 
+        location_event: t.location_event || '', 
+        customer_name: t.customer_name || '', 
+        customer_phone: t.customer_phone || '',
+        created_at: localDateTime // Masukkan tanggal ke state edit
+    })
     setEditModal(true)
   }
 
   const saveEdit = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    // Kembalikan waktu ke format standar ISO sebelum dikirim ke database
+    const updatedDateISO = new Date(editData.created_at).toISOString()
+
     const { error } = await supabase.from('transactions').update({
-        payment_method: editData.payment_method, note: editData.note, location_event: editData.location_event, customer_name: editData.customer_name, customer_phone: editData.customer_phone
+        payment_method: editData.payment_method, 
+        note: editData.note, 
+        location_event: editData.location_event, 
+        customer_name: editData.customer_name, 
+        customer_phone: editData.customer_phone,
+        created_at: updatedDateISO // Kirim update tanggal ke database
     }).eq('id', editData.id)
 
-    if(error) alert("Gagal update: " + error.message)
-    else {
-        setTransactions(prev => prev.map(t => t.id === editData.id ? { ...t, ...editData } : t))
-        setEditModal(false); alert("Data berhasil diupdate!")
+    if(error) {
+        toast.error("Gagal update: " + error.message)
+    } else {
+        // Update state lokal tanpa harus refresh halaman
+        setTransactions(prev => prev.map(t => t.id === editData.id ? { 
+            ...t, 
+            ...editData,
+            created_at: updatedDateISO // Sinkronisasi tanggal di UI
+        } : t))
+        setEditModal(false)
+        toast.success("Data transaksi berhasil diperbarui!")
     }
   }
+  // ==========================================
 
   const openReceipt = (t: any) => {
     const subtotal = t.transaction_items.reduce((acc: number, item: any) => acc + (item.price_at_purchase * item.quantity), 0)
@@ -161,49 +195,35 @@ export default function Transactions() {
 
   const getImgUrl = (path: string) => `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/pos-images/${path}`
 
-  // ==========================================
-  // LOGIKA MULTIPLE FILTER & SORTING
-  // ==========================================
   const uniqueEvents = Array.from(new Set(transactions.map(t => t.location_event || 'Umum/Toko')))
 
   const processedData = useMemo(() => {
     let result = [...transactions]
 
-    // 1. Search Filter (Nama Produk atau Note)
     if (search) {
         const s = search.toLowerCase()
         result = result.filter(t => {
-            // Cek apakah ada barang di dalam daftar items yang namanya mengandung kata pencarian
-            const matchProduct = t.items?.some((item: any) => 
-                (item.name || item.product_name || '').toLowerCase().includes(s)
+            // 1. Cek apakah ada di dalam nama produk (Perbaikan: menggunakan transaction_items dan products?.name)
+            const matchProduct = t.transaction_items?.some((item: any) => 
+                (item.products?.name || '').toLowerCase().includes(s)
             )
-
-            // Cek juga apakah catatannya (note) mengandung kata pencarian
+            
+            // 2. Cek apakah ada di catatan (note)
             const matchNote = (t.note?.toLowerCase() || '').includes(s)
+            
+            // 3. Cek apakah ada di nama pelanggan (customer_name)
+            const matchCustomer = (t.customer_name?.toLowerCase() || '').includes(s)
 
-            return matchProduct || matchNote
+            // Jika salah satu dari ketiga di atas cocok, maka tampilkan transaksinya!
+            return matchProduct || matchNote || matchCustomer
         })
     }
 
-    // 2. Event Filter
-    if (filterEvent) {
-        result = result.filter(t => (t.location_event || 'Umum/Toko') === filterEvent)
-    }
+    if (filterEvent) result = result.filter(t => (t.location_event || 'Umum/Toko') === filterEvent)
+    if (filterPayment) result = result.filter(t => t.payment_method === filterPayment)
+    if (dateFrom) result = result.filter(t => new Date(t.created_at) >= new Date(dateFrom + 'T00:00:00'))
+    if (dateTo) result = result.filter(t => new Date(t.created_at) <= new Date(dateTo + 'T23:59:59'))
 
-    // 3. Payment Filter
-    if (filterPayment) {
-        result = result.filter(t => t.payment_method === filterPayment)
-    }
-
-    // 4. Date Filter (From - To)
-    if (dateFrom) {
-        result = result.filter(t => new Date(t.created_at) >= new Date(dateFrom + 'T00:00:00'))
-    }
-    if (dateTo) {
-        result = result.filter(t => new Date(t.created_at) <= new Date(dateTo + 'T23:59:59'))
-    }
-
-    // 5. Sorting
     result.sort((a, b) => {
         if (sortBy === 'date-desc') return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         if (sortBy === 'date-asc') return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
@@ -215,12 +235,8 @@ export default function Transactions() {
     return result
   }, [transactions, search, filterEvent, filterPayment, dateFrom, dateTo, sortBy])
 
-  // Ringkasan Dinamis
   const filteredTotalAmount = processedData.reduce((sum, t) => sum + t.total_amount, 0)
-
-  const resetFilters = () => {
-      setSearch(''); setFilterEvent(''); setFilterPayment(''); setDateFrom(''); setDateTo(''); setSortBy('date-desc');
-  }
+  const resetFilters = () => { setSearch(''); setFilterEvent(''); setFilterPayment(''); setDateFrom(''); setDateTo(''); setSortBy('date-desc'); }
 
   if (loading) return <div className="p-4 text-center dark:text-white">Memuat data...</div>
 
@@ -238,16 +254,14 @@ export default function Transactions() {
           </button>
       </div>
 
-      {/* PANEL FILTER & SORTING */}
+      {/* PANEL FILTER */}
       <div className={`overflow-hidden transition-all duration-300 ease-in-out ${showFilters ? 'max-h-[600px] opacity-100 mb-6' : 'max-h-0 opacity-0 mb-0'}`}>
           <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm border dark:border-slate-700 space-y-4">
-              
-              {/* Baris 1: Search & Sort */}
               <div className="flex flex-col md:flex-row gap-3">
                   <div className="relative flex-1">
                       <Search className="absolute left-3 top-3 text-gray-400" size={18} />
                       <input 
-                        type="text" placeholder="Cari Nama Pelanggan atau Catatan..." 
+                        type="text" placeholder="Cari Nama Produk atau Catatan..." 
                         className="w-full pl-9 p-2.5 rounded-xl border text-sm dark:border-slate-600 bg-gray-50 dark:bg-slate-700 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
                         value={search} onChange={e => setSearch(e.target.value)}
                       />
@@ -262,14 +276,12 @@ export default function Transactions() {
                       <option value="amount-asc">Nominal Terendah</option>
                   </select>
               </div>
-
-              {/* Baris 2: Multiple Filters */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <div>
                       <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">Event / Lokasi</label>
                       <select className="w-full border p-2.5 rounded-xl text-sm bg-gray-50 dark:bg-slate-700 dark:text-white dark:border-slate-600 outline-none mt-1" value={filterEvent} onChange={e => setFilterEvent(e.target.value)}>
                           <option value="">Semua Event</option>
-                          {uniqueEvents.map((evt, idx) => <option key={idx} value={evt}>{evt}</option>)}
+                          {uniqueEvents.map((evt, idx) => <option key={idx} value={evt as string}>{evt as string}</option>)}
                       </select>
                   </div>
                   <div>
@@ -288,8 +300,6 @@ export default function Transactions() {
                       <input type="date" className="w-full border p-2 rounded-xl text-sm bg-gray-50 dark:bg-slate-700 dark:text-white dark:border-slate-600 outline-none mt-1" value={dateTo} onChange={e => setDateTo(e.target.value)} />
                   </div>
               </div>
-
-              {/* Baris 3: Reset Button */}
               <div className="flex justify-end pt-2 border-t dark:border-slate-700 mt-2">
                   <button onClick={resetFilters} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white transition-colors">
                       <RefreshCcw size={14}/> Reset Filter
@@ -298,7 +308,6 @@ export default function Transactions() {
           </div>
       </div>
 
-      {/* RINGKASAN DINAMIS */}
       <div className="flex justify-between items-center mb-4 px-1">
           <div className="text-xs font-bold text-gray-500 dark:text-gray-400">
               Menampilkan {processedData.length} Transaksi
@@ -409,7 +418,7 @@ export default function Transactions() {
         })}
       </div>
 
-      {/* MODALS */}
+      {/* MODAL FULLSCREEN IMAGE */}
       {previewImage && (
         <div className="fixed inset-0 z-[60] bg-black/95 flex items-center justify-center p-4" onClick={() => setPreviewImage(null)}>
           <button onClick={() => setPreviewImage(null)} className="absolute top-4 right-4 bg-white/10 text-white p-2 rounded-full"><X size={24} /></button>
@@ -417,6 +426,7 @@ export default function Transactions() {
         </div>
       )}
 
+      {/* MODAL EDIT TRANSAKSI */}
       {editModal && editData && (
         <div className="fixed inset-0 z-[99] bg-black/80 flex items-center justify-center p-4">
             <div className="bg-white dark:bg-slate-800 w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-in fade-in zoom-in duration-200">
@@ -428,6 +438,17 @@ export default function Transactions() {
                     *Untuk menjaga sinkronisasi stok, <b>edit isi barang tidak diizinkan</b>. Jika barang salah, klik <b>Void</b> transaksi ini.
                 </div>
                 <form onSubmit={saveEdit} className="space-y-4">
+                    {/* FIELD TANGGAL TRANSAKSI BARU */}
+                    <div>
+                        <label className="text-xs font-bold text-gray-500">Waktu & Tanggal Transaksi</label>
+                        <input 
+                            type="datetime-local" 
+                            className="w-full border p-2 rounded-xl bg-gray-50 dark:bg-slate-700 dark:text-white dark:border-slate-600 focus:ring-2 focus:ring-pop-green outline-none mt-1" 
+                            value={editData.created_at} 
+                            onChange={e => setEditData({...editData, created_at: e.target.value})} 
+                        />
+                    </div>
+
                     <div className="grid grid-cols-2 gap-2">
                         <div>
                             <label className="text-xs font-bold text-gray-500">Metode Bayar</label>
@@ -452,7 +473,7 @@ export default function Transactions() {
                         <input type="text" placeholder="Kosong..." className="w-full border p-2 rounded-xl bg-gray-50 dark:bg-slate-700 dark:text-white dark:border-slate-600 focus:ring-2 focus:ring-pop-green outline-none" value={editData.customer_phone} onChange={e => setEditData({...editData, customer_phone: e.target.value})} />
                     </div>
                     
-                    <button type="submit" className="w-full bg-pop-green hover:bg-pop-green-dark text-white py-3 rounded-xl font-bold text-sm flex justify-center mt-4 transition-colors">
+                    <button type="submit" className="w-full bg-pop-green hover:bg-emerald-600 text-white py-3 rounded-xl font-bold text-sm flex justify-center mt-4 transition-colors">
                         Simpan Perubahan
                     </button>
                 </form>
